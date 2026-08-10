@@ -1,0 +1,12 @@
+# Kavya is the initial merge authority. Add collaborator GitHub handles to the
+# module paths below as soon as the team confirms their exact usernames.
+* @kavya-jain14
+
+/packages/contracts/ @kavya-jain14
+/packages/security/ @kavya-jain14
+/packages/risk-core/ @kavya-jain14
+/packages/payment-core/ @kavya-jain14
+/packages/database/ @kavya-jain14
+/apps/api/ @kavya-jain14
+/.github/ @kavya-jain14
+/docs/MASTER_BLUEPRINT.md @kavya-jain14

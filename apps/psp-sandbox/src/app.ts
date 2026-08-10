@@ -1,0 +1,98 @@
+import { randomUUID } from 'node:crypto';
+
+import Fastify, { type FastifyInstance } from 'fastify';
+import { z } from 'zod';
+
+import { createLoggerOptions } from '@trinetra/observability';
+import { canonicalJson, signPartnerRequest } from '@trinetra/security';
+
+const SimulatorRequestSchema = z.object({
+  payment_id: z.string().min(4),
+  amount_paise: z.number().int().positive(),
+  scenario: z
+    .enum([
+      'SUCCESS_IMMEDIATE',
+      'PENDING_THEN_SUCCESS',
+      'PENDING_THEN_REVERSED',
+      'SOFT_DECLINE',
+      'HARD_DECLINE',
+      'TIMEOUT_UNKNOWN',
+      'DUPLICATE_CALLBACK',
+      'OUT_OF_ORDER_CALLBACK',
+      'INVALID_SIGNATURE_CALLBACK',
+    ])
+    .default('SUCCESS_IMMEDIATE'),
+});
+
+const initialStatus = {
+  SUCCESS_IMMEDIATE: 'SUCCEEDED',
+  PENDING_THEN_SUCCESS: 'PENDING',
+  PENDING_THEN_REVERSED: 'PENDING',
+  SOFT_DECLINE: 'FAILED_SOFT',
+  HARD_DECLINE: 'FAILED_HARD',
+  TIMEOUT_UNKNOWN: 'PENDING',
+  DUPLICATE_CALLBACK: 'SUCCEEDED',
+  OUT_OF_ORDER_CALLBACK: 'SUCCEEDED',
+  INVALID_SIGNATURE_CALLBACK: 'SUCCEEDED',
+} as const;
+
+export interface PspSandboxConfig {
+  callbackSecret: string;
+  now?: () => Date;
+  logger?: boolean;
+  logLevel?: string;
+}
+
+export async function buildPspSandbox(config: PspSandboxConfig): Promise<FastifyInstance> {
+  const app = Fastify({
+    logger: config.logger ? createLoggerOptions(config.logLevel) : false,
+  });
+  const now = config.now ?? (() => new Date());
+
+  app.get('/health/live', async () => ({ status: 'ok', service: 'trinetra-psp-sandbox' }));
+
+  app.post('/v1/simulate', async (request, reply) => {
+    const parsed = SimulatorRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_FAILED', message: 'Invalid deterministic PSP scenario.' },
+      });
+    }
+
+    const eventId = `pe_${randomUUID().replaceAll('-', '')}`;
+    const providerEvent = {
+      event_id: eventId,
+      payment_id: parsed.data.payment_id,
+      provider_ref: `psp_${parsed.data.payment_id}`,
+      status: initialStatus[parsed.data.scenario],
+      amount_paise: parsed.data.amount_paise,
+      occurred_at: now().toISOString(),
+    };
+    const body = canonicalJson(providerEvent);
+    const timestamp = String(Math.floor(now().getTime() / 1000));
+    const callbackPath = '/v1/provider-events/trinetra-sandbox';
+    let signature = signPartnerRequest(config.callbackSecret, {
+      method: 'POST',
+      path: callbackPath,
+      timestamp,
+      nonce: eventId,
+      body,
+    });
+    if (parsed.data.scenario === 'INVALID_SIGNATURE_CALLBACK') signature = '0'.repeat(64);
+
+    return reply.code(200).send({
+      scenario: parsed.data.scenario,
+      provider_event: providerEvent,
+      callback: {
+        path: callbackPath,
+        headers: {
+          'x-timestamp': timestamp,
+          'x-nonce': eventId,
+          'x-signature': signature,
+        },
+      },
+    });
+  });
+
+  return app;
+}
