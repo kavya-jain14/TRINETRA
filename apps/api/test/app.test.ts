@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { canonicalJson, signPartnerRequest } from '@trinetra/security';
+import { InMemoryPaymentLedgerRepository } from '@trinetra/payment-core';
 
 import { buildApp } from '../src/app.js';
 
@@ -153,6 +154,57 @@ describe('TRINETRA partner API foundation', () => {
     await app.close();
   });
 
+  it('stores a privacy-minimized payment request without cleartext names', async () => {
+    const repository = new InMemoryPaymentLedgerRepository();
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      ledgerRepository: repository,
+    });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/payment-intents',
+      headers: signedHeaders(trustedIntent, 'nonce_privacy_001', 'idem_privacy_001'),
+      payload: trustedIntent,
+    });
+    const payment = await repository.getPayment(
+      '00000000-0000-4000-8000-000000000001',
+      created.json().payment_intent_id,
+    );
+    const stored = JSON.stringify(payment?.requestBody);
+
+    expect(stored).not.toContain('Aarav Electronics');
+    expect(payment?.requestBody).toMatchObject({
+      beneficiary: { vpa_token: 'vpa_tok_trusted_merchant' },
+      merchant: { merchant_ref: 'm_demo_12', mcc: '5732' },
+    });
+    expect(payment?.requestBody).toMatchObject({
+      merchant: { payee_name_matches_merchant: true },
+    });
+    await app.close();
+  });
+
+  it('returns NOT_FOUND instead of INTERNAL_ERROR for an unknown payment submit', async () => {
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+    });
+    const body = { scenario: 'SUCCESS_IMMEDIATE' } as const;
+    const path = '/v1/payment-intents/pi_missing_001/submit';
+    const response = await app.inject({
+      method: 'POST',
+      url: path,
+      headers: signedHeaders(body, 'nonce_missing_001', 'idem_missing_001', path),
+      payload: body,
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('NOT_FOUND');
+    await app.close();
+  });
+
   it('submits once, recovers through an authenticated callback, and ignores stale events', async () => {
     const app = await buildApp({
       partnerKey: 'partner_demo',
@@ -177,6 +229,21 @@ describe('TRINETRA partner API foundation', () => {
     expect(submitted.statusCode).toBe(202);
     expect(submitted.json().payment.state).toBe('PENDING');
 
+    const changedSubmission = { scenario: 'SUCCESS_IMMEDIATE' } as const;
+    const conflict = await app.inject({
+      method: 'POST',
+      url: submitPath,
+      headers: signedHeaders(
+        changedSubmission,
+        'nonce_flow_submit_conflict',
+        'idem_submit_001',
+        submitPath,
+      ),
+      payload: changedSubmission,
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error.code).toBe('IDEMPOTENCY_CONFLICT');
+
     const callback = {
       event_id: 'pe_api_success_001',
       payment_id: paymentId,
@@ -185,6 +252,13 @@ describe('TRINETRA partner API foundation', () => {
       amount_paise: trustedIntent.amount_paise,
       occurred_at: fixedNow.toISOString(),
     } as const;
+    const wrongReference = { ...callback, event_id: 'pe_api_wrong_ref', provider_ref: 'psp_wrong' };
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/v1/provider-events/trinetra-sandbox',
+      headers: providerHeaders(wrongReference, 'nonce_callback_wrong_ref'),
+      payload: wrongReference,
+    });
     const applied = await app.inject({
       method: 'POST',
       url: '/v1/provider-events/trinetra-sandbox',
@@ -205,6 +279,8 @@ describe('TRINETRA partner API foundation', () => {
       payload: stale,
     });
 
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json().error.code).toBe('VALIDATION_FAILED');
     expect(applied.statusCode).toBe(202);
     expect(applied.json()).toMatchObject({ outcome: 'APPLIED', payment: { state: 'SUCCEEDED' } });
     expect(duplicate.json().outcome).toBe('DUPLICATE');

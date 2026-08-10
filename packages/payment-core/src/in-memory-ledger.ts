@@ -9,7 +9,9 @@ import {
   type CompleteProviderAttemptInput,
   type CreatePaymentInput,
   type CreatePaymentResult,
+  type DueRecoveryJobRecord,
   type OutboxEventRecord,
+  type PendingOutboxEventRecord,
   type PaymentIntentRecord,
   type PaymentLedgerRepository,
   type PaymentStateEventRecord,
@@ -17,6 +19,7 @@ import {
   type PrepareProviderAttemptResult,
   type ProviderAttemptRecord,
   type ProviderEventResult,
+  type RecordRecoverySignalInput,
   type RecoveryClockRecord,
   type TransitionPaymentInput,
 } from './ledger.js';
@@ -79,7 +82,7 @@ function recoveryForTransition(
   toState: PaymentState,
   now: Date,
 ): RecoveryClockRecord | undefined {
-  if (toState === 'PENDING') {
+  if (toState === 'SUBMITTED' || toState === 'PENDING') {
     return {
       tenantId,
       paymentId,
@@ -132,10 +135,7 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
   readonly #stateEvents = new Map<string, PaymentStateEventRecord[]>();
   readonly #outboxEvents = new Map<string, OutboxEventRecord[]>();
   readonly #attempts = new Map<string, ProviderAttemptRecord>();
-  readonly #providerEvents = new Map<
-    string,
-    { payloadHash: string; providerStatus: string; providerReference: string }
-  >();
+  readonly #providerEvents = new Map<string, ApplyProviderEventInput>();
   readonly #recoveryClocks = new Map<string, RecoveryClockRecord>();
   #failNextOutbox = false;
 
@@ -226,6 +226,23 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
     input: PrepareProviderAttemptInput,
   ): Promise<PrepareProviderAttemptResult> {
     const payment = this.#requirePayment(input.tenantId, input.paymentId);
+    const idempotencyKey =
+      input.operation === 'SUBMIT' && input.idempotencyKey
+        ? `${input.tenantId}:payment-submit:${input.idempotencyKey}`
+        : null;
+    if (input.operation === 'SUBMIT') {
+      if (!idempotencyKey || !input.idempotencyRequestHash) {
+        throw new Error('Provider submission requires a durable idempotency binding.');
+      }
+      const binding = this.#idempotency.get(idempotencyKey);
+      if (
+        binding &&
+        (binding.requestHash !== input.idempotencyRequestHash ||
+          binding.paymentId !== input.paymentId)
+      ) {
+        throw new IdempotencyConflictError();
+      }
+    }
     const existing = [...this.#attempts.values()].find(
       (attempt) =>
         attempt.tenantId === input.tenantId &&
@@ -234,6 +251,13 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
           (input.operation === 'SUBMIT' && attempt.operation === 'SUBMIT')),
     );
     if (existing) {
+      if (idempotencyKey && input.idempotencyRequestHash) {
+        this.#idempotency.set(idempotencyKey, {
+          requestHash: input.idempotencyRequestHash,
+          paymentId: input.paymentId,
+          responseBody: null,
+        });
+      }
       return {
         created: false,
         attempt: cloneAttempt(existing),
@@ -244,7 +268,7 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
     if (input.operation === 'SUBMIT') {
       assertPaymentTransition(payment.state, 'SUBMITTED');
     } else if (payment.state !== 'PENDING' && payment.state !== 'SUBMITTED') {
-      throw new Error(`Status inquiry requires PENDING or SUBMITTED, received ${payment.state}.`);
+      throw new Error(`Status inquiry requires SUBMITTED or PENDING, received ${payment.state}.`);
     }
 
     this.#assertOutboxAvailable();
@@ -265,6 +289,11 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
 
     this.#attempts.set(`${input.tenantId}:${input.id}`, attempt);
     if (input.operation === 'SUBMIT') {
+      this.#idempotency.set(idempotencyKey!, {
+        requestHash: input.idempotencyRequestHash!,
+        paymentId: input.paymentId,
+        responseBody: null,
+      });
       payment.providerRequestReference = input.requestReference;
       const transitioned = this.#commitTransition(payment, {
         tenantId: input.tenantId,
@@ -311,6 +340,17 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
       return { outcome: 'IGNORED_STALE', payment: clonePayment(payment) };
     }
     if (payment.state === input.providerStatus) {
+      if (attempt.operation === 'STATUS_INQUIRY' && input.providerStatus === 'PENDING') {
+        const key = paymentKey(input.tenantId, payment.id);
+        const clock = this.#recoveryClocks.get(key);
+        if (clock) {
+          this.#recoveryClocks.set(key, {
+            ...clock,
+            statusCheckDueAt: new Date(input.now.getTime() + 10_000),
+            updatedAt: new Date(input.now),
+          });
+        }
+      }
       return { outcome: 'APPLIED', payment: clonePayment(payment) };
     }
 
@@ -335,19 +375,21 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
     const payment = this.#requirePayment(input.tenantId, input.paymentId);
     const existing = this.#providerEvents.get(providerEventKey);
     if (existing) {
-      // Detect mutated re-deliveries (different payload = fraud/error)
       if (
-        existing.payloadHash !== input.payloadHash ||
+        existing.paymentId !== input.paymentId ||
+        existing.providerReference !== input.providerReference ||
         existing.providerStatus !== input.providerStatus ||
-        existing.providerReference !== input.providerReference
+        existing.payloadHash !== input.payloadHash ||
+        existing.amountPaise !== input.amountPaise
       ) {
-        throw new ProviderPayloadMismatchError();
+        throw new ProviderPayloadMismatchError(
+          'The provider event ID is bound to different content.',
+        );
       }
       return { outcome: 'DUPLICATE', payment: clonePayment(payment) };
     }
-    if (payment.amountPaise !== input.amountPaise) throw new ProviderPayloadMismatchError();
     if (
-      payment.providerRequestReference &&
+      payment.amountPaise !== input.amountPaise ||
       payment.providerRequestReference !== input.providerReference
     ) {
       throw new ProviderPayloadMismatchError();
@@ -358,9 +400,9 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
       canTransitionPayment(payment.state, input.providerStatus);
     if (canApply && payment.state !== input.providerStatus) this.#assertOutboxAvailable();
     this.#providerEvents.set(providerEventKey, {
-      payloadHash: input.payloadHash,
-      providerStatus: input.providerStatus,
-      providerReference: input.providerReference,
+      ...input,
+      occurredAt: new Date(input.occurredAt),
+      receivedAt: new Date(input.receivedAt),
     });
 
     if (!canApply) {
@@ -418,14 +460,94 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
       .map(cloneAttempt);
   }
 
-  async markOutboxEventPublished(tenantId: string, eventId: string): Promise<void> {
-    for (const events of this.#outboxEvents.values()) {
-      const event = events.find((e) => e.tenantId === tenantId && e.id === eventId);
-      if (event) {
-        event.publishedAt = new Date();
-        break;
+  async listDueRecoveryJobs(now: Date, limit: number): Promise<DueRecoveryJobRecord[]> {
+    const jobs: DueRecoveryJobRecord[] = [];
+    for (const clock of this.#recoveryClocks.values()) {
+      const payment = this.#payments.get(paymentKey(clock.tenantId, clock.paymentId));
+      if (!payment) continue;
+      let operation: DueRecoveryJobRecord['operation'] | null = null;
+      let dueAt: Date | null = null;
+      if (payment.state === 'PENDING' && clock.pendingExpiresAt && clock.pendingExpiresAt <= now) {
+        operation = 'PENDING_TIMEOUT';
+        dueAt = clock.pendingExpiresAt;
+      } else if (
+        (payment.state === 'SUBMITTED' || payment.state === 'PENDING') &&
+        clock.statusCheckDueAt &&
+        clock.statusCheckDueAt <= now
+      ) {
+        operation = 'STATUS_CHECK';
+        dueAt = clock.statusCheckDueAt;
+      } else if (
+        payment.state === 'REVERSAL_PENDING' &&
+        ((clock.complaintEligibleAt && clock.complaintEligibleAt <= now) ||
+          (clock.reversalDueAt && clock.reversalDueAt <= now))
+      ) {
+        operation = 'REVERSAL_CLOCK';
+        dueAt =
+          clock.complaintEligibleAt && clock.complaintEligibleAt <= now
+            ? clock.complaintEligibleAt
+            : clock.reversalDueAt;
       }
+      if (!operation || !dueAt) continue;
+      jobs.push({
+        tenantId: clock.tenantId,
+        paymentId: clock.paymentId,
+        operation,
+        recoveryKey: `${operation.toLowerCase()}-${dueAt.getTime()}`,
+        dueAt: new Date(dueAt),
+      });
     }
+    return jobs.sort((a, b) => a.dueAt.getTime() - b.dueAt.getTime()).slice(0, limit);
+  }
+
+  async listPendingOutboxEvents(now: Date, limit: number): Promise<PendingOutboxEventRecord[]> {
+    return [...this.#outboxEvents.values()]
+      .flat()
+      .filter((event) => event.publishedAt === null && event.createdAt <= now)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime())
+      .slice(0, limit)
+      .map((event) => ({
+        id: event.id,
+        tenantId: event.tenantId,
+        aggregateId: event.aggregateId,
+        eventKey: event.eventKey,
+        eventType: event.eventType,
+        payload: structuredClone(event.payload),
+        createdAt: new Date(event.createdAt),
+      }));
+  }
+
+  async getOutboxEvent(tenantId: string, outboxEventId: string): Promise<OutboxEventRecord | null> {
+    const event = [...this.#outboxEvents.values()]
+      .flat()
+      .find((candidate) => candidate.tenantId === tenantId && candidate.id === outboxEventId);
+    return event
+      ? {
+          ...event,
+          payload: structuredClone(event.payload),
+          createdAt: new Date(event.createdAt),
+          publishedAt: cloneDate(event.publishedAt),
+        }
+      : null;
+  }
+
+  async markOutboxPublished(tenantId: string, outboxEventId: string, now: Date): Promise<boolean> {
+    const event = [...this.#outboxEvents.values()]
+      .flat()
+      .find((candidate) => candidate.tenantId === tenantId && candidate.id === outboxEventId);
+    if (!event || event.publishedAt) return false;
+    event.publishedAt = new Date(now);
+    return true;
+  }
+
+  async recordRecoverySignal(input: RecordRecoverySignalInput): Promise<void> {
+    const payment = this.#requirePayment(input.tenantId, input.paymentId);
+    const key = paymentKey(input.tenantId, input.paymentId);
+    if ((this.#outboxEvents.get(key) ?? []).some((event) => event.eventKey === input.eventKey))
+      return;
+    this.#assertOutboxAvailable();
+    const event = this.#outboxEvent(payment, input.eventKey, input.eventType, input.now);
+    this.#outboxEvents.set(key, [...(this.#outboxEvents.get(key) ?? []), event]);
   }
 
   #requirePayment(tenantId: string, paymentId: string): PaymentIntentRecord {

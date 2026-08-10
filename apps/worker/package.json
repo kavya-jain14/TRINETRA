@@ -15,6 +15,7 @@
     "@trinetra/database": "workspace:*",
     "@trinetra/observability": "workspace:*",
     "@trinetra/payment-core": "workspace:*",
+    "@trinetra/security": "workspace:*",
     "bullmq": "6.0.10",
     "ioredis": "6.0.0"
   },

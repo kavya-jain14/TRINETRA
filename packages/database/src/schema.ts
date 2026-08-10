@@ -229,6 +229,26 @@ export const providerEvents = pgTable(
   ],
 );
 
+export const syntheticProviderPayments = pgTable(
+  'synthetic_provider_payments',
+  {
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    providerReference: text('provider_reference').notNull(),
+    paymentExternalRef: text('payment_external_ref').notNull(),
+    amountPaise: integer('amount_paise').notNull(),
+    scenario: text('scenario').notNull(),
+    currentStatus: providerPaymentStatusEnum('current_status').notNull(),
+    inquiryCount: integer('inquiry_count').notNull().default(0),
+    lastInquiryRequestReference: text('last_inquiry_request_reference'),
+    lastInquiryStatus: providerPaymentStatusEnum('last_inquiry_status'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [primaryKey({ columns: [table.tenantId, table.providerReference] })],
+);
+
 export const paymentRecoveryClocks = pgTable(
   'payment_recovery_clocks',
   {

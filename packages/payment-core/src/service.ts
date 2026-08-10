@@ -7,13 +7,13 @@ import type {
   RiskDecision,
 } from '@trinetra/contracts';
 
-import {
-  PaymentNotFoundError,
-  type ApplyProviderEventInput,
-  type CreatePaymentResult,
-  type PaymentIntentRecord,
-  type PaymentLedgerRepository,
-  type ProviderEventResult,
+import { PaymentNotFoundError } from './ledger.js';
+import type {
+  ApplyProviderEventInput,
+  CreatePaymentResult,
+  PaymentIntentRecord,
+  PaymentLedgerRepository,
+  ProviderEventResult,
 } from './ledger.js';
 import type { PaymentProviderAdapter } from './provider.js';
 
@@ -47,22 +47,6 @@ function digest(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
-function redactPII(body: unknown): unknown {
-  if (typeof body !== 'object' || body === null) return body;
-  const clone = structuredClone(body) as Record<string, unknown>;
-
-  if (clone.beneficiary && typeof clone.beneficiary === 'object') {
-    const ben = clone.beneficiary as Record<string, unknown>;
-    if ('resolved_name' in ben) ben.resolved_name = '[REDACTED]';
-  }
-  if (clone.merchant && typeof clone.merchant === 'object') {
-    const mer = clone.merchant as Record<string, unknown>;
-    if ('expected_name' in mer) mer.expected_name = '[REDACTED]';
-  }
-
-  return clone;
-}
-
 export class PaymentLedgerService {
   readonly #repository: PaymentLedgerRepository;
   readonly #provider: PaymentProviderAdapter;
@@ -80,12 +64,7 @@ export class PaymentLedgerService {
     input: CreateRiskEvaluatedPaymentInput,
   ): Promise<CreatePaymentResult> {
     const now = this.#now();
-    const redactedRequest = redactPII(input.requestBody);
-    const created = await this.#repository.createPayment({
-      ...input,
-      requestBody: redactedRequest,
-      now,
-    });
+    const created = await this.#repository.createPayment({ ...input, now });
     if (created.outcome === 'REPLAY') return created;
 
     await this.#repository.transitionPayment({
@@ -112,7 +91,7 @@ export class PaymentLedgerService {
     tenantId: string,
     paymentId: string,
     scenario: ProviderScenario,
-    idempotencyKey: string,
+    idempotency?: { key: string; requestHash: string },
   ): Promise<ProviderEventResult> {
     const payment = await this.#requirePayment(tenantId, paymentId);
     const requestReference = `psp_${paymentId.slice(3)}`;
@@ -124,27 +103,25 @@ export class PaymentLedgerService {
       provider: this.#provider.name,
       operation: 'SUBMIT',
       requestReference,
-      requestHash: digest(`${paymentId}:${payment.amountPaise}:${scenario}:${idempotencyKey}`),
+      requestHash: digest(`${paymentId}:${payment.amountPaise}:${scenario}`),
+      idempotencyKey: idempotency?.key ?? `submit:${paymentId}`,
+      idempotencyRequestHash: digest(
+        `${paymentId}:${idempotency?.requestHash ?? digest(JSON.stringify({ scenario }))}`,
+      ),
       eventKey: `${paymentId}:submitted`,
       now: this.#now(),
     });
 
     if (!prepared.created) return { outcome: 'DUPLICATE', payment: prepared.payment };
 
+    let result;
     try {
-      const result = await this.#provider.submit({
+      result = await this.#provider.submit({
+        tenantId,
         paymentId,
         requestReference,
         amountPaise: payment.amountPaise,
         scenario,
-      });
-      return await this.#repository.completeProviderAttempt({
-        tenantId,
-        attemptId,
-        providerStatus: result.providerStatus,
-        responseCode: result.responseCode,
-        evidence: result.evidence,
-        now: this.#now(),
       });
     } catch {
       return await this.#repository.completeProviderAttempt({
@@ -156,6 +133,14 @@ export class PaymentLedgerService {
         now: this.#now(),
       });
     }
+    return await this.#repository.completeProviderAttempt({
+      tenantId,
+      attemptId,
+      providerStatus: result.providerStatus,
+      responseCode: result.responseCode,
+      evidence: result.evidence,
+      now: this.#now(),
+    });
   }
 
   async inquirePendingPayment(
@@ -178,35 +163,42 @@ export class PaymentLedgerService {
       operation: 'STATUS_INQUIRY',
       requestReference,
       requestHash: digest(`${paymentId}:${recoveryKey}`),
+      idempotencyKey: null,
+      idempotencyRequestHash: null,
       eventKey: `${paymentId}:status-inquiry:${recoveryKey}`,
       now: this.#now(),
     });
-    if (!prepared.created) return { outcome: 'DUPLICATE', payment: prepared.payment };
+    if (!prepared.created && prepared.attempt.status !== 'STARTED') {
+      return { outcome: 'DUPLICATE', payment: prepared.payment };
+    }
+    const activeAttemptId = prepared.attempt.id;
 
+    let result;
     try {
-      const result = await this.#provider.inquire({
+      result = await this.#provider.inquire({
+        tenantId,
         paymentId,
         requestReference,
         providerRequestReference: payment.providerRequestReference,
       });
-      return await this.#repository.completeProviderAttempt({
-        tenantId,
-        attemptId,
-        providerStatus: result.providerStatus,
-        responseCode: result.responseCode,
-        evidence: result.evidence,
-        now: this.#now(),
-      });
     } catch {
       return await this.#repository.completeProviderAttempt({
         tenantId,
-        attemptId,
+        attemptId: activeAttemptId,
         providerStatus: 'PENDING',
         responseCode: 'TIMEOUT_UNKNOWN',
         evidence: { recovery: 'STATUS_FIRST' },
         now: this.#now(),
       });
     }
+    return await this.#repository.completeProviderAttempt({
+      tenantId,
+      attemptId: activeAttemptId,
+      providerStatus: result.providerStatus,
+      responseCode: result.responseCode,
+      evidence: result.evidence,
+      now: this.#now(),
+    });
   }
 
   async applyProviderCallback(

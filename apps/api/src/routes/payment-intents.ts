@@ -2,7 +2,11 @@ import { randomUUID } from 'node:crypto';
 
 import type { FastifyInstance } from 'fastify';
 
-import { PaymentIntentRequestSchema, RiskAssessmentSchema } from '@trinetra/contracts';
+import {
+  PaymentIntentRequestSchema,
+  RiskAssessmentSchema,
+  type PaymentIntentRequest,
+} from '@trinetra/contracts';
 import {
   IdempotencyConflictError,
   type CreatePaymentResult,
@@ -15,6 +19,33 @@ import { authenticatePartnerRequest, type PartnerAuthConfig } from '../auth.js';
 export interface PaymentIntentRouteConfig extends PartnerAuthConfig {
   ledgerService: PaymentLedgerService;
   tenantId: string;
+}
+
+function normalizedName(value: string): string {
+  return value.trim().toLocaleLowerCase('en-IN').replace(/\s+/g, ' ');
+}
+
+function privacyMinimizedRequest(input: PaymentIntentRequest) {
+  return {
+    partner_customer_ref: input.partner_customer_ref,
+    direction: input.direction,
+    payment_type: input.payment_type,
+    amount_paise: input.amount_paise,
+    currency: input.currency,
+    beneficiary: {
+      vpa_token: input.beneficiary.vpa_token,
+    },
+    merchant: input.merchant
+      ? {
+          merchant_ref: input.merchant.merchant_ref,
+          payee_name_matches_merchant:
+            normalizedName(input.merchant.expected_name) ===
+            normalizedName(input.beneficiary.resolved_name),
+          mcc: input.merchant.mcc,
+        }
+      : undefined,
+    context: input.context,
+  };
 }
 
 export async function registerPaymentIntentRoutes(
@@ -55,7 +86,7 @@ export async function registerPaymentIntentRoutes(
         partnerCustomerRef: parsed.data.partner_customer_ref,
         idempotencyKey: authentication.idempotencyKey,
         requestHash: authentication.requestHash,
-        requestBody: parsed.data,
+        requestBody: privacyMinimizedRequest(parsed.data),
         responseBody: evaluated,
         amountPaise: parsed.data.amount_paise,
         currency: parsed.data.currency,

@@ -6,7 +6,8 @@ import {
   PaymentLedgerService,
 } from '@trinetra/payment-core';
 
-import { processRecoveryJob } from '../src/processors.js';
+import { processRecoveryJob, processWebhookJob } from '../src/processors.js';
+import { enqueueDueWork } from '../src/scheduler.js';
 
 const tenantId = '00000000-0000-4000-8000-000000000001';
 const now = new Date('2026-08-10T12:00:00.000Z');
@@ -70,5 +71,54 @@ describe('recovery processors', () => {
     expect(result).toEqual({ outcome: 'REVERSAL_STARTED', state: 'REVERSAL_PENDING' });
     const clock = await harness.repository.getRecoveryClock(tenantId, 'pi_worker_001');
     expect(clock?.reversalDueAt?.toISOString()).toBe('2026-08-10T12:00:30.000Z');
+  });
+
+  it('re-enqueues durable recovery clocks and unpublished outbox events idempotently', async () => {
+    const harness = await pendingHarness('PENDING_THEN_SUCCESS');
+    const recoveryAdds: Array<{ data: unknown; options: { jobId: string } }> = [];
+    const webhookAdds: Array<{ data: unknown; options: { jobId: string } }> = [];
+    const queue = (adds: Array<{ data: unknown; options: { jobId: string } }>) => ({
+      async add(_name: string, data: unknown, options: { jobId: string }) {
+        adds.push({ data, options });
+      },
+    });
+    const result = await enqueueDueWork(
+      {
+        repository: harness.repository,
+        recoveryQueue: queue(recoveryAdds),
+        webhookQueue: queue(webhookAdds),
+      },
+      new Date(now.getTime() + 61_000),
+    );
+
+    expect(result.recoveryJobs).toBe(1);
+    expect(recoveryAdds[0]?.data).toMatchObject({ operation: 'PENDING_TIMEOUT' });
+    expect(result.webhookJobs).toBeGreaterThan(0);
+    expect(new Set(webhookAdds.map((entry) => entry.options.jobId)).size).toBe(webhookAdds.length);
+  });
+
+  it('signs and durably marks an outbox delivery exactly once', async () => {
+    const harness = await pendingHarness('PENDING_THEN_SUCCESS');
+    const [event] = await harness.repository.listPendingOutboxEvents(now, 1);
+    expect(event).toBeDefined();
+    const data = {
+      tenantId,
+      outboxEventId: event!.id,
+      deliveryKey: `outbox-${event!.id}`,
+    };
+    const dependencies = {
+      repository: harness.repository,
+      signingSecret: 'worker-test-secret-at-least-32-characters',
+      now: () => now,
+    };
+    const delivered = await processWebhookJob(data, dependencies);
+    const duplicate = await processWebhookJob(data, dependencies);
+
+    expect(delivered.outcome).toBe('DELIVERED');
+    expect(delivered.signature).toMatch(/^[a-f0-9]{64}$/);
+    expect(duplicate.outcome).toBe('DUPLICATE');
+    expect(
+      (await harness.repository.getOutboxEvent(tenantId, event!.id))?.publishedAt?.toISOString(),
+    ).toBe(now.toISOString());
   });
 });

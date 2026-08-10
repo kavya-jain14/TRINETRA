@@ -1,6 +1,7 @@
 import type { ProviderPaymentStatus, ProviderScenario } from '@trinetra/contracts';
 
 export interface ProviderSubmissionInput {
+  tenantId: string;
   paymentId: string;
   requestReference: string;
   amountPaise: number;
@@ -8,6 +9,7 @@ export interface ProviderSubmissionInput {
 }
 
 export interface ProviderInquiryInput {
+  tenantId: string;
   paymentId: string;
   requestReference: string;
   providerRequestReference: string;
@@ -29,6 +31,8 @@ export interface PaymentProviderAdapter {
 interface SyntheticPayment {
   scenario: ProviderScenario;
   inquiryCount: number;
+  lastInquiryRequestReference: string | null;
+  lastInquiryStatus: ProviderPaymentStatus | null;
 }
 
 const initialProviderStatus: Readonly<Record<ProviderScenario, ProviderPaymentStatus>> = {
@@ -59,7 +63,12 @@ export class DeterministicPaymentProviderAdapter implements PaymentProviderAdapt
 
   async submit(input: ProviderSubmissionInput): Promise<ProviderOperationResult> {
     this.#submissionCount += 1;
-    this.#payments.set(input.requestReference, { scenario: input.scenario, inquiryCount: 0 });
+    this.#payments.set(`${input.tenantId}:${input.requestReference}`, {
+      scenario: input.scenario,
+      inquiryCount: 0,
+      lastInquiryRequestReference: null,
+      lastInquiryStatus: null,
+    });
     const providerStatus = initialProviderStatus[input.scenario];
     return {
       providerStatus,
@@ -71,7 +80,7 @@ export class DeterministicPaymentProviderAdapter implements PaymentProviderAdapt
 
   async inquire(input: ProviderInquiryInput): Promise<ProviderOperationResult> {
     this.#inquiryCount += 1;
-    const payment = this.#payments.get(input.providerRequestReference);
+    const payment = this.#payments.get(`${input.tenantId}:${input.providerRequestReference}`);
     if (!payment) {
       return {
         providerStatus: 'PENDING',
@@ -81,12 +90,30 @@ export class DeterministicPaymentProviderAdapter implements PaymentProviderAdapt
       };
     }
 
+    if (
+      payment.lastInquiryRequestReference === input.requestReference &&
+      payment.lastInquiryStatus
+    ) {
+      return {
+        providerStatus: payment.lastInquiryStatus,
+        responseCode: 'SYNTHETIC_STATUS_REPLAY',
+        providerReference: input.providerRequestReference,
+        evidence: {
+          inquiry_request_ref: input.requestReference,
+          inquiry_number: payment.inquiryCount,
+          idempotent_replay: true,
+        },
+      };
+    }
+
     payment.inquiryCount += 1;
     let providerStatus = initialProviderStatus[payment.scenario];
     if (payment.scenario === 'PENDING_THEN_SUCCESS') providerStatus = 'SUCCEEDED';
     if (payment.scenario === 'PENDING_THEN_REVERSED') {
       providerStatus = payment.inquiryCount === 1 ? 'REVERSAL_PENDING' : 'REVERSED';
     }
+    payment.lastInquiryRequestReference = input.requestReference;
+    payment.lastInquiryStatus = providerStatus;
 
     return {
       providerStatus,

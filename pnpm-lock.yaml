@@ -194,6 +194,9 @@ importers:
       '@trinetra/payment-core':
         specifier: workspace:*
         version: link:../../packages/payment-core
+      '@trinetra/security':
+        specifier: workspace:*
+        version: link:../../packages/security
       bullmq:
         specifier: 6.0.10
         version: 6.0.10(ioredis@6.0.0)(pg@8.23.0)

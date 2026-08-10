@@ -9,7 +9,9 @@ import {
   type CompleteProviderAttemptInput,
   type CreatePaymentInput,
   type CreatePaymentResult,
+  type DueRecoveryJobRecord,
   type OutboxEventRecord,
+  type PendingOutboxEventRecord,
   type PaymentIntentRecord,
   type PaymentLedgerRepository,
   type PaymentStateEventRecord,
@@ -19,6 +21,7 @@ import {
   type ProviderAttemptRecord,
   type ProviderAttemptStatus,
   type ProviderEventResult,
+  type RecordRecoverySignalInput,
   type RecoveryClockRecord,
   type TransitionPaymentInput,
 } from '@trinetra/payment-core';
@@ -62,6 +65,15 @@ interface ProviderAttemptRow extends QueryResultRow {
   response_code: string | null;
   created_at: Date | string;
   completed_at: Date | string | null;
+}
+
+interface ProviderEventRow extends QueryResultRow {
+  id: string;
+  payment_intent_id: string;
+  provider_reference: string;
+  provider_status: ProviderPaymentStatus;
+  payload_hash: string;
+  amount_paise: number;
 }
 
 interface StateEventRow extends QueryResultRow {
@@ -280,6 +292,9 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
   ): Promise<PrepareProviderAttemptResult> {
     return await this.#transaction(async (client) => {
       const payment = await this.#requirePayment(client, input.tenantId, input.paymentId, true);
+      if (input.operation === 'SUBMIT') {
+        await this.#bindSubmitIdempotency(client, input, payment);
+      }
       const existingResult = await client.query<ProviderAttemptRow>(
         `SELECT pa.id, pa.tenant_id, pi.external_ref AS payment_id, pa.provider, pa.operation,
                 pa.request_reference, pa.request_hash, pa.status, pa.provider_status,
@@ -302,7 +317,7 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
       if (input.operation === 'SUBMIT') {
         assertPaymentTransition(payment.state, 'SUBMITTED');
       } else if (payment.state !== 'PENDING' && payment.state !== 'SUBMITTED') {
-        throw new Error(`Status inquiry requires PENDING or SUBMITTED, received ${payment.state}.`);
+        throw new Error(`Status inquiry requires SUBMITTED or PENDING, received ${payment.state}.`);
       }
 
       const attemptResult = await client.query<ProviderAttemptRow>(
@@ -398,6 +413,20 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
       );
 
       if (payment.state === input.providerStatus) {
+        if (attempt.operation === 'STATUS_INQUIRY' && input.providerStatus === 'PENDING') {
+          await client.query(
+            `UPDATE payment_recovery_clocks
+                SET status_check_due_at = $3,
+                    updated_at = $4
+              WHERE tenant_id = $1 AND payment_intent_id = $2`,
+            [
+              input.tenantId,
+              payment.internal_id,
+              new Date(input.now.getTime() + 10_000),
+              input.now,
+            ],
+          );
+        }
         return { outcome: 'APPLIED', payment: toPayment(payment) };
       }
       if (!canTransitionPayment(payment.state, input.providerStatus)) {
@@ -424,12 +453,24 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
   async applyProviderEvent(input: ApplyProviderEventInput): Promise<ProviderEventResult> {
     return await this.#transaction(async (client) => {
       const payment = await this.#requirePayment(client, input.tenantId, input.paymentId, true);
-      if (payment.amount_paise !== input.amountPaise) throw new ProviderPayloadMismatchError();
       if (
-        payment.provider_request_reference &&
+        payment.amount_paise !== input.amountPaise ||
         payment.provider_request_reference !== input.providerReference
       ) {
         throw new ProviderPayloadMismatchError();
+      }
+
+      const existingResult = await client.query<ProviderEventRow>(
+        `SELECT id, payment_intent_id, provider_reference, provider_status,
+                payload_hash, amount_paise
+           FROM provider_events
+          WHERE tenant_id = $1 AND provider = $2 AND provider_event_id = $3`,
+        [input.tenantId, input.provider, input.providerEventId],
+      );
+      const existing = existingResult.rows[0];
+      if (existing) {
+        this.#assertMatchingProviderEvent(existing, payment, input);
+        return { outcome: 'DUPLICATE', payment: toPayment(payment) };
       }
 
       const inserted = await client.query<{ id: string } & QueryResultRow>(
@@ -455,27 +496,16 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
         ],
       );
       if (inserted.rowCount === 0) {
-        const existing = await client.query<
-          {
-            payload_hash: string;
-            provider_status: string;
-            provider_reference: string;
-          } & QueryResultRow
-        >(
-          `SELECT payload_hash, provider_status, provider_reference FROM provider_events
-           WHERE tenant_id = $1 AND provider = $2 AND provider_event_id = $3`,
+        const conflictResult = await client.query<ProviderEventRow>(
+          `SELECT id, payment_intent_id, provider_reference, provider_status,
+                  payload_hash, amount_paise
+             FROM provider_events
+            WHERE tenant_id = $1 AND provider = $2 AND provider_event_id = $3`,
           [input.tenantId, input.provider, input.providerEventId],
         );
-        if (existing.rows[0]) {
-          const row = existing.rows[0];
-          if (
-            row.payload_hash !== input.payloadHash ||
-            row.provider_status !== input.providerStatus ||
-            row.provider_reference !== input.providerReference
-          ) {
-            throw new ProviderPayloadMismatchError();
-          }
-        }
+        const conflict = conflictResult.rows[0];
+        if (!conflict) throw new Error('Provider event conflict could not be resolved.');
+        this.#assertMatchingProviderEvent(conflict, payment, input);
         return { outcome: 'DUPLICATE', payment: toPayment(payment) };
       }
 
@@ -570,13 +600,6 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
     }));
   }
 
-  async markOutboxEventPublished(tenantId: string, eventId: string): Promise<void> {
-    await this.pool.query(
-      `UPDATE outbox_events SET published_at = $3 WHERE tenant_id = $1 AND id = $2`,
-      [tenantId, eventId, new Date()],
-    );
-  }
-
   async listProviderAttempts(
     tenantId: string,
     paymentId: string,
@@ -595,6 +618,153 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
     return result.rows.map(toAttempt);
   }
 
+  async listDueRecoveryJobs(now: Date, limit: number): Promise<DueRecoveryJobRecord[]> {
+    const result = await this.pool.query<
+      QueryResultRow & {
+        tenant_id: string;
+        payment_id: string;
+        state: PaymentState;
+        status_check_due_at: Date | string | null;
+        pending_expires_at: Date | string | null;
+        reversal_due_at: Date | string | null;
+        complaint_eligible_at: Date | string | null;
+      }
+    >(
+      `SELECT prc.tenant_id, pi.external_ref AS payment_id, pi.state,
+              prc.status_check_due_at, prc.pending_expires_at,
+              prc.reversal_due_at, prc.complaint_eligible_at
+         FROM payment_recovery_clocks prc
+         JOIN payment_intents pi
+           ON pi.tenant_id = prc.tenant_id AND pi.id = prc.payment_intent_id
+        WHERE (pi.state IN ('SUBMITTED', 'PENDING') AND prc.status_check_due_at <= $1)
+           OR (pi.state = 'PENDING' AND prc.pending_expires_at <= $1)
+           OR (pi.state = 'REVERSAL_PENDING'
+               AND (prc.reversal_due_at <= $1 OR prc.complaint_eligible_at <= $1))
+        ORDER BY CASE
+          WHEN pi.state = 'PENDING' AND prc.pending_expires_at <= $1
+            THEN prc.pending_expires_at
+          WHEN pi.state IN ('SUBMITTED', 'PENDING') THEN prc.status_check_due_at
+          WHEN prc.complaint_eligible_at <= $1 THEN prc.complaint_eligible_at
+          ELSE prc.reversal_due_at
+        END
+        LIMIT $2`,
+      [now, limit],
+    );
+    return result.rows.map((row) => {
+      let operation: DueRecoveryJobRecord['operation'];
+      let dueAt: Date;
+      if (
+        row.state === 'PENDING' &&
+        row.pending_expires_at &&
+        asDate(row.pending_expires_at) <= now
+      ) {
+        operation = 'PENDING_TIMEOUT';
+        dueAt = asDate(row.pending_expires_at);
+      } else if (row.state === 'SUBMITTED' || row.state === 'PENDING') {
+        operation = 'STATUS_CHECK';
+        dueAt = asDate(row.status_check_due_at!);
+      } else {
+        operation = 'REVERSAL_CLOCK';
+        dueAt =
+          row.complaint_eligible_at && asDate(row.complaint_eligible_at) <= now
+            ? asDate(row.complaint_eligible_at)
+            : asDate(row.reversal_due_at!);
+      }
+      return {
+        tenantId: row.tenant_id,
+        paymentId: row.payment_id,
+        operation,
+        recoveryKey: `${operation.toLowerCase()}-${dueAt.getTime()}`,
+        dueAt,
+      };
+    });
+  }
+
+  async listPendingOutboxEvents(now: Date, limit: number): Promise<PendingOutboxEventRecord[]> {
+    const result = await this.pool.query<OutboxEventRow>(
+      `SELECT oe.id, oe.tenant_id, pi.external_ref AS aggregate_id, oe.event_key,
+              oe.event_type, oe.payload, oe.created_at, oe.published_at
+         FROM outbox_events oe
+         JOIN payment_intents pi
+           ON pi.tenant_id = oe.tenant_id AND pi.id = oe.aggregate_id
+        WHERE oe.published_at IS NULL AND oe.available_at <= $1
+        ORDER BY oe.available_at, oe.created_at, oe.id
+        LIMIT $2`,
+      [now, limit],
+    );
+    return result.rows.map((row) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      aggregateId: row.aggregate_id,
+      eventKey: row.event_key,
+      eventType: row.event_type,
+      payload: row.payload,
+      createdAt: asDate(row.created_at),
+    }));
+  }
+
+  async getOutboxEvent(tenantId: string, outboxEventId: string): Promise<OutboxEventRecord | null> {
+    const result = await this.pool.query<OutboxEventRow>(
+      `SELECT oe.id, oe.tenant_id, pi.external_ref AS aggregate_id, oe.event_key,
+              oe.event_type, oe.payload, oe.created_at, oe.published_at
+         FROM outbox_events oe
+         JOIN payment_intents pi
+           ON pi.tenant_id = oe.tenant_id AND pi.id = oe.aggregate_id
+        WHERE oe.tenant_id = $1 AND oe.id = $2`,
+      [tenantId, outboxEventId],
+    );
+    const row = result.rows[0];
+    return row
+      ? {
+          id: row.id,
+          tenantId: row.tenant_id,
+          aggregateId: row.aggregate_id,
+          eventKey: row.event_key,
+          eventType: row.event_type,
+          payload: row.payload,
+          createdAt: asDate(row.created_at),
+          publishedAt: asNullableDate(row.published_at),
+        }
+      : null;
+  }
+
+  async markOutboxPublished(tenantId: string, outboxEventId: string, now: Date): Promise<boolean> {
+    const result = await this.pool.query(
+      `UPDATE outbox_events
+          SET published_at = $3,
+              publish_attempts = publish_attempts + 1
+        WHERE tenant_id = $1 AND id = $2 AND published_at IS NULL
+        RETURNING id`,
+      [tenantId, outboxEventId, now],
+    );
+    return result.rowCount === 1;
+  }
+
+  async recordRecoverySignal(input: RecordRecoverySignalInput): Promise<void> {
+    await this.#transaction(async (client) => {
+      const payment = await this.#requirePayment(client, input.tenantId, input.paymentId, true);
+      await client.query(
+        `INSERT INTO outbox_events (
+           tenant_id, aggregate_type, aggregate_id, event_key, event_type,
+           payload, created_at, available_at
+         ) VALUES ($1, 'payment_intent', $2, $3, $4, $5, $6, $6)
+         ON CONFLICT (tenant_id, event_key) DO NOTHING`,
+        [
+          input.tenantId,
+          payment.internal_id,
+          input.eventKey,
+          input.eventType,
+          {
+            payment_id: payment.id,
+            state: payment.state,
+            resource_version: payment.resource_version,
+          },
+          input.now,
+        ],
+      );
+    });
+  }
+
   async #transaction<T>(operation: (client: PoolClient) => Promise<T>): Promise<T> {
     const client = await this.pool.connect();
     try {
@@ -607,6 +777,84 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
       throw error;
     } finally {
       client.release();
+    }
+  }
+
+  async #bindSubmitIdempotency(
+    client: PoolClient,
+    input: PrepareProviderAttemptInput,
+    payment: PaymentRow,
+  ): Promise<void> {
+    if (!input.idempotencyKey || !input.idempotencyRequestHash) {
+      throw new Error('Provider submission requires a durable idempotency binding.');
+    }
+    const currentResult = await client.query<IdempotencyRow>(
+      `SELECT request_hash, payment_external_ref, response_body
+         FROM idempotency_records
+        WHERE tenant_id = $1 AND operation = 'payment-submit' AND key = $2
+        FOR UPDATE`,
+      [input.tenantId, input.idempotencyKey],
+    );
+    const current = currentResult.rows[0];
+    if (current) {
+      if (
+        current.request_hash !== input.idempotencyRequestHash ||
+        current.payment_external_ref !== payment.id
+      ) {
+        throw new IdempotencyConflictError();
+      }
+      return;
+    }
+
+    await client.query(
+      `INSERT INTO idempotency_records (
+         tenant_id, operation, key, request_hash, payment_external_ref,
+         response_body, created_at, expires_at
+       ) VALUES ($1, 'payment-submit', $2, $3, $4, NULL, $5, $6)
+       ON CONFLICT (tenant_id, operation, key) DO NOTHING
+       RETURNING key`,
+      [
+        input.tenantId,
+        input.idempotencyKey,
+        input.idempotencyRequestHash,
+        input.paymentId,
+        input.now,
+        new Date(input.now.getTime() + 24 * 60 * 60 * 1000),
+      ],
+    );
+
+    const existingResult = await client.query<IdempotencyRow>(
+      `SELECT request_hash, payment_external_ref, response_body
+         FROM idempotency_records
+        WHERE tenant_id = $1 AND operation = 'payment-submit' AND key = $2
+        FOR UPDATE`,
+      [input.tenantId, input.idempotencyKey],
+    );
+    const existing = existingResult.rows[0];
+    if (
+      !existing ||
+      existing.request_hash !== input.idempotencyRequestHash ||
+      existing.payment_external_ref !== payment.id
+    ) {
+      throw new IdempotencyConflictError();
+    }
+  }
+
+  #assertMatchingProviderEvent(
+    existing: ProviderEventRow,
+    payment: PaymentRow,
+    input: ApplyProviderEventInput,
+  ): void {
+    if (
+      existing.payment_intent_id !== payment.internal_id ||
+      existing.provider_reference !== input.providerReference ||
+      existing.provider_status !== input.providerStatus ||
+      existing.payload_hash !== input.payloadHash ||
+      existing.amount_paise !== input.amountPaise
+    ) {
+      throw new ProviderPayloadMismatchError(
+        'The provider event ID is bound to different content.',
+      );
     }
   }
 
@@ -768,7 +1016,7 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
     toState: PaymentState,
     now: Date,
   ): Promise<void> {
-    if (toState === 'PENDING') {
+    if (toState === 'SUBMITTED' || toState === 'PENDING') {
       await client.query(
         `INSERT INTO payment_recovery_clocks (
            tenant_id, payment_intent_id, status_check_due_at, pending_expires_at, updated_at

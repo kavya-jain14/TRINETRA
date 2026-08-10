@@ -2,9 +2,14 @@ import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 
 import { workerEnvSchema } from '@trinetra/config';
-import { createDatabase, ensureTenant, PostgresPaymentLedgerRepository } from '@trinetra/database';
+import {
+  createDatabase,
+  ensureTenant,
+  PostgresDeterministicPaymentProviderAdapter,
+  PostgresPaymentLedgerRepository,
+} from '@trinetra/database';
 import { createLogger } from '@trinetra/observability';
-import { HttpPaymentProviderAdapter, PaymentLedgerService } from '@trinetra/payment-core';
+import { PaymentLedgerService } from '@trinetra/payment-core';
 
 import {
   queueNames,
@@ -13,7 +18,7 @@ import {
   type WebhookJobData,
 } from './queues.js';
 import { processReconciliationJob, processRecoveryJob, processWebhookJob } from './processors.js';
-import { startRecoveryScanner } from './scanner.js';
+import { enqueueDueWork } from './scheduler.js';
 
 const env = workerEnvSchema.parse(process.env);
 const logger = createLogger(env.LOG_LEVEL);
@@ -27,12 +32,11 @@ await ensureTenant(pool, {
 const repository = new PostgresPaymentLedgerRepository(pool);
 const ledgerService = new PaymentLedgerService({
   repository,
-  provider: new HttpPaymentProviderAdapter(process.env.PSP_SANDBOX_URL ?? 'http://localhost:3002'),
+  provider: new PostgresDeterministicPaymentProviderAdapter(pool),
 });
 const dependencies = { repository, ledgerService };
-
 const recoveryQueue = new Queue<RecoveryJobData>(queueNames.recovery, { connection });
-const stopScanner = await startRecoveryScanner(pool, recoveryQueue);
+const webhookQueue = new Queue<WebhookJobData>(queueNames.webhooks, { connection });
 
 const recoveryWorker = new Worker<RecoveryJobData>(
   queueNames.recovery,
@@ -46,10 +50,31 @@ const reconciliationWorker = new Worker<ReconciliationJobData>(
 );
 const webhookWorker = new Worker<WebhookJobData>(
   queueNames.webhooks,
-  async (job) => await processWebhookJob(job.data, dependencies),
+  async (job) =>
+    await processWebhookJob(job.data, {
+      repository,
+      signingSecret: env.DEMO_PARTNER_SECRET,
+    }),
   { connection, concurrency: 4 },
 );
 const workers = [recoveryWorker, reconciliationWorker, webhookWorker];
+const queues = [recoveryQueue, webhookQueue];
+let schedulerRunning = false;
+
+async function scheduleDurableWork(): Promise<void> {
+  if (schedulerRunning) return;
+  schedulerRunning = true;
+  try {
+    await enqueueDueWork({ repository, recoveryQueue, webhookQueue });
+  } catch (error) {
+    logger.error({ err: error }, 'Durable work scheduling failed');
+  } finally {
+    schedulerRunning = false;
+  }
+}
+
+const schedulerTimer = setInterval(() => void scheduleDurableWork(), 1_000);
+void scheduleDurableWork();
 
 for (const worker of workers) {
   worker.on('failed', (job, error) => {
@@ -59,8 +84,9 @@ for (const worker of workers) {
 
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Stopping TRINETRA workers');
+  clearInterval(schedulerTimer);
   await Promise.all(workers.map(async (worker) => await worker.close()));
-  stopScanner();
+  await Promise.all(queues.map(async (queue) => await queue.close()));
   await connection.quit();
   await pool.end();
 }

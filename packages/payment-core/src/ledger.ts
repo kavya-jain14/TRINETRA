@@ -110,6 +110,8 @@ export interface PrepareProviderAttemptInput {
   operation: ProviderAttemptOperation;
   requestReference: string;
   requestHash: string;
+  idempotencyKey: string | null;
+  idempotencyRequestHash: string | null;
   eventKey: string;
   now: Date;
 }
@@ -148,6 +150,34 @@ export interface ProviderEventResult {
   payment: PaymentIntentRecord;
 }
 
+export type RecoveryJobOperation = 'STATUS_CHECK' | 'PENDING_TIMEOUT' | 'REVERSAL_CLOCK';
+
+export interface DueRecoveryJobRecord {
+  tenantId: string;
+  paymentId: string;
+  operation: RecoveryJobOperation;
+  recoveryKey: string;
+  dueAt: Date;
+}
+
+export interface PendingOutboxEventRecord {
+  id: string;
+  tenantId: string;
+  aggregateId: string;
+  eventKey: string;
+  eventType: string;
+  payload: Readonly<Record<string, unknown>>;
+  createdAt: Date;
+}
+
+export interface RecordRecoverySignalInput {
+  tenantId: string;
+  paymentId: string;
+  eventKey: string;
+  eventType: 'payment.reversal_escalation_required' | 'payment.complaint_eligible';
+  now: Date;
+}
+
 export interface PaymentLedgerRepository {
   createPayment(input: CreatePaymentInput): Promise<CreatePaymentResult>;
   getPayment(tenantId: string, paymentId: string): Promise<PaymentIntentRecord | null>;
@@ -159,7 +189,11 @@ export interface PaymentLedgerRepository {
   listStateEvents(tenantId: string, paymentId: string): Promise<PaymentStateEventRecord[]>;
   listOutboxEvents(tenantId: string, paymentId: string): Promise<OutboxEventRecord[]>;
   listProviderAttempts(tenantId: string, paymentId: string): Promise<ProviderAttemptRecord[]>;
-  markOutboxEventPublished(tenantId: string, eventId: string): Promise<void>;
+  listDueRecoveryJobs(now: Date, limit: number): Promise<DueRecoveryJobRecord[]>;
+  listPendingOutboxEvents(now: Date, limit: number): Promise<PendingOutboxEventRecord[]>;
+  getOutboxEvent(tenantId: string, outboxEventId: string): Promise<OutboxEventRecord | null>;
+  markOutboxPublished(tenantId: string, outboxEventId: string, now: Date): Promise<boolean>;
+  recordRecoverySignal(input: RecordRecoverySignalInput): Promise<void>;
 }
 
 export class PaymentNotFoundError extends Error {
@@ -177,8 +211,8 @@ export class IdempotencyConflictError extends Error {
 }
 
 export class ProviderPayloadMismatchError extends Error {
-  constructor() {
-    super('The provider event does not match the original payment amount.');
+  constructor(message = 'The provider event does not match the original payment or prior event.') {
+    super(message);
     this.name = 'ProviderPayloadMismatchError';
   }
 }

@@ -10,6 +10,7 @@ import {
 } from '@trinetra/contracts';
 import {
   IllegalPaymentTransitionError,
+  IdempotencyConflictError,
   PaymentNotFoundError,
   ProviderPayloadMismatchError,
   type PaymentIntentRecord,
@@ -59,23 +60,12 @@ export async function registerPaymentOperationRoutes(
       });
     }
 
-    const idempotencyKey = request.headers['idempotency-key'];
-    if (typeof idempotencyKey !== 'string' || !idempotencyKey) {
-      return reply.code(400).send({
-        error: {
-          code: 'VALIDATION_FAILED',
-          message: 'Missing Idempotency-Key header.',
-          trace_id: `tr_${request.id}`,
-        },
-      });
-    }
-
     try {
       const result = await config.ledgerService.submitPayment(
         config.tenantId,
         params.data.paymentId,
         body.data.scenario,
-        idempotencyKey,
+        { key: authentication.idempotencyKey, requestHash: authentication.requestHash },
       );
       return reply.code(result.outcome === 'DUPLICATE' ? 200 : 202).send(
         PaymentOperationResultSchema.parse({
@@ -98,6 +88,15 @@ export async function registerPaymentOperationRoutes(
           error: {
             code: 'ILLEGAL_STATE_TRANSITION',
             message: 'Payment state does not allow provider submission.',
+            trace_id: `tr_${request.id}`,
+          },
+        });
+      }
+      if (error instanceof IdempotencyConflictError) {
+        return reply.code(409).send({
+          error: {
+            code: 'IDEMPOTENCY_CONFLICT',
+            message: 'The idempotency key is already bound to a different submission.',
             trace_id: `tr_${request.id}`,
           },
         });
@@ -151,7 +150,7 @@ export async function registerPaymentOperationRoutes(
         return reply.code(409).send({
           error: {
             code: 'VALIDATION_FAILED',
-            message: 'Provider event amount does not match the payment.',
+            message: 'Provider event does not match the payment or prior event.',
             trace_id: `tr_${request.id}`,
           },
         });

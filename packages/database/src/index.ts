@@ -1,4 +1,5 @@
 export * from './client.js';
 export * from './payment-ledger-repository.js';
+export * from './postgres-provider-adapter.js';
 export * from './schema.js';
 export * from './tenants.js';

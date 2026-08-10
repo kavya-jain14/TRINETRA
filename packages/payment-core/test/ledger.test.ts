@@ -7,6 +7,7 @@ import {
   InMemoryPaymentLedgerRepository,
   PaymentLedgerService,
   PaymentNotFoundError,
+  ProviderPayloadMismatchError,
 } from '../src/index.js';
 
 const tenantA = '00000000-0000-4000-8000-000000000001';
@@ -172,6 +173,107 @@ describe('payment ledger service', () => {
     expect(
       (await repository.listProviderAttempts(tenantA, 'pi_payment_001')).map((a) => a.operation),
     ).toEqual(['SUBMIT', 'STATUS_INQUIRY']);
+  });
+
+  it('recovers a crash window from SUBMITTED without blindly resubmitting', async () => {
+    const { provider, repository, service } = buildHarness();
+    await createAllowedPayment(service);
+    await repository.prepareProviderAttempt({
+      id: 'pa_crash_window',
+      tenantId: tenantA,
+      paymentId: 'pi_payment_001',
+      provider: provider.name,
+      operation: 'SUBMIT',
+      requestReference: 'psp_payment_001',
+      requestHash: 'submit_hash',
+      idempotencyKey: 'idem_crash_submit',
+      idempotencyRequestHash: 'idem_crash_hash',
+      eventKey: 'pi_payment_001:submitted',
+      now: fixedNow,
+    });
+
+    const retry = await service.submitPayment(tenantA, 'pi_payment_001', 'SUCCESS_IMMEDIATE');
+    const recovered = await service.inquirePendingPayment(
+      tenantA,
+      'pi_payment_001',
+      'crash-recovery',
+    );
+
+    expect(retry.outcome).toBe('DUPLICATE');
+    expect(provider.submissionCount).toBe(0);
+    expect(recovered.payment.state).toBe('PENDING');
+    expect(provider.inquiryCount).toBe(1);
+  });
+
+  it('resumes a STARTED status inquiry after a worker crash using the same request key', async () => {
+    const { provider, repository, service } = buildHarness();
+    await createAllowedPayment(service);
+    await service.submitPayment(tenantA, 'pi_payment_001', 'PENDING_THEN_SUCCESS');
+    await repository.prepareProviderAttempt({
+      id: 'pa_status_crash',
+      tenantId: tenantA,
+      paymentId: 'pi_payment_001',
+      provider: provider.name,
+      operation: 'STATUS_INQUIRY',
+      requestReference: 'status_payment_001_status-crash',
+      requestHash: 'status_hash',
+      idempotencyKey: null,
+      idempotencyRequestHash: null,
+      eventKey: 'pi_payment_001:status-inquiry:status-crash',
+      now: fixedNow,
+    });
+
+    const recovered = await service.inquirePendingPayment(
+      tenantA,
+      'pi_payment_001',
+      'status-crash',
+    );
+
+    expect(recovered.payment.state).toBe('SUCCEEDED');
+    expect(provider.inquiryCount).toBe(1);
+  });
+
+  it('rejects callbacks with a wrong provider reference or changed event content', async () => {
+    const { service } = buildHarness();
+    await createAllowedPayment(service);
+    await service.submitPayment(tenantA, 'pi_payment_001', 'PENDING_THEN_SUCCESS');
+    const callback = {
+      event_id: 'pe_bound_001',
+      payment_id: 'pi_payment_001',
+      provider_ref: 'psp_payment_001',
+      status: 'PENDING',
+      amount_paise: 24_900,
+      occurred_at: fixedNow.toISOString(),
+    } as const;
+
+    await expect(
+      service.applyProviderCallback(
+        tenantA,
+        { ...callback, provider_ref: 'psp_different_payment' },
+        'wrong_ref_hash',
+      ),
+    ).rejects.toThrow(ProviderPayloadMismatchError);
+    await service.applyProviderCallback(tenantA, callback, 'original_hash');
+    await expect(
+      service.applyProviderCallback(tenantA, { ...callback, status: 'SUCCEEDED' }, 'changed_hash'),
+    ).rejects.toThrow(ProviderPayloadMismatchError);
+  });
+
+  it('binds submit idempotency keys to one payment and request body', async () => {
+    const { provider, service } = buildHarness();
+    await createAllowedPayment(service);
+    await service.submitPayment(tenantA, 'pi_payment_001', 'PENDING_THEN_SUCCESS', {
+      key: 'idem_submit_bound',
+      requestHash: 'request_hash_one',
+    });
+
+    await expect(
+      service.submitPayment(tenantA, 'pi_payment_001', 'SUCCESS_IMMEDIATE', {
+        key: 'idem_submit_bound',
+        requestHash: 'request_hash_two',
+      }),
+    ).rejects.toThrow(IdempotencyConflictError);
+    expect(provider.submissionCount).toBe(1);
   });
 
   it('rolls back the state update when the outbox write fails', async () => {

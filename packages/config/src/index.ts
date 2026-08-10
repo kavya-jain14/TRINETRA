@@ -18,6 +18,7 @@ export type ApiEnv = z.infer<typeof apiEnvSchema>;
 export const workerEnvSchema = commonEnvSchema.extend({
   DATABASE_URL: z.string().url(),
   REDIS_URL: z.string().url(),
+  DEMO_PARTNER_SECRET: z.string().min(32),
   DEMO_TENANT_ID: z.uuid().default('00000000-0000-4000-8000-000000000001'),
 });
 export type WorkerEnv = z.infer<typeof workerEnvSchema>;
