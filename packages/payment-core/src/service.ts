@@ -7,12 +7,13 @@ import type {
   RiskDecision,
 } from '@trinetra/contracts';
 
-import type {
-  ApplyProviderEventInput,
-  CreatePaymentResult,
-  PaymentIntentRecord,
-  PaymentLedgerRepository,
-  ProviderEventResult,
+import {
+  PaymentNotFoundError,
+  type ApplyProviderEventInput,
+  type CreatePaymentResult,
+  type PaymentIntentRecord,
+  type PaymentLedgerRepository,
+  type ProviderEventResult,
 } from './ledger.js';
 import type { PaymentProviderAdapter } from './provider.js';
 
@@ -46,6 +47,22 @@ function digest(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
 }
 
+function redactPII(body: unknown): unknown {
+  if (typeof body !== 'object' || body === null) return body;
+  const clone = structuredClone(body) as Record<string, unknown>;
+
+  if (clone.beneficiary && typeof clone.beneficiary === 'object') {
+    const ben = clone.beneficiary as Record<string, unknown>;
+    if ('resolved_name' in ben) ben.resolved_name = '[REDACTED]';
+  }
+  if (clone.merchant && typeof clone.merchant === 'object') {
+    const mer = clone.merchant as Record<string, unknown>;
+    if ('expected_name' in mer) mer.expected_name = '[REDACTED]';
+  }
+
+  return clone;
+}
+
 export class PaymentLedgerService {
   readonly #repository: PaymentLedgerRepository;
   readonly #provider: PaymentProviderAdapter;
@@ -63,7 +80,12 @@ export class PaymentLedgerService {
     input: CreateRiskEvaluatedPaymentInput,
   ): Promise<CreatePaymentResult> {
     const now = this.#now();
-    const created = await this.#repository.createPayment({ ...input, now });
+    const redactedRequest = redactPII(input.requestBody);
+    const created = await this.#repository.createPayment({
+      ...input,
+      requestBody: redactedRequest,
+      now,
+    });
     if (created.outcome === 'REPLAY') return created;
 
     await this.#repository.transitionPayment({
@@ -90,6 +112,7 @@ export class PaymentLedgerService {
     tenantId: string,
     paymentId: string,
     scenario: ProviderScenario,
+    idempotencyKey: string,
   ): Promise<ProviderEventResult> {
     const payment = await this.#requirePayment(tenantId, paymentId);
     const requestReference = `psp_${paymentId.slice(3)}`;
@@ -101,7 +124,7 @@ export class PaymentLedgerService {
       provider: this.#provider.name,
       operation: 'SUBMIT',
       requestReference,
-      requestHash: digest(`${paymentId}:${payment.amountPaise}:${scenario}`),
+      requestHash: digest(`${paymentId}:${payment.amountPaise}:${scenario}:${idempotencyKey}`),
       eventKey: `${paymentId}:submitted`,
       now: this.#now(),
     });
@@ -214,7 +237,7 @@ export class PaymentLedgerService {
 
   async #requirePayment(tenantId: string, paymentId: string): Promise<PaymentIntentRecord> {
     const payment = await this.#repository.getPayment(tenantId, paymentId);
-    if (!payment) throw new Error(`Payment ${paymentId} was not found.`);
+    if (!payment) throw new PaymentNotFoundError(paymentId);
     return payment;
   }
 }

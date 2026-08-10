@@ -1,10 +1,10 @@
-import { Worker } from 'bullmq';
+import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 
 import { workerEnvSchema } from '@trinetra/config';
 import { createDatabase, ensureTenant, PostgresPaymentLedgerRepository } from '@trinetra/database';
 import { createLogger } from '@trinetra/observability';
-import { DeterministicPaymentProviderAdapter, PaymentLedgerService } from '@trinetra/payment-core';
+import { HttpPaymentProviderAdapter, PaymentLedgerService } from '@trinetra/payment-core';
 
 import {
   queueNames,
@@ -13,6 +13,7 @@ import {
   type WebhookJobData,
 } from './queues.js';
 import { processReconciliationJob, processRecoveryJob, processWebhookJob } from './processors.js';
+import { startRecoveryScanner } from './scanner.js';
 
 const env = workerEnvSchema.parse(process.env);
 const logger = createLogger(env.LOG_LEVEL);
@@ -26,9 +27,12 @@ await ensureTenant(pool, {
 const repository = new PostgresPaymentLedgerRepository(pool);
 const ledgerService = new PaymentLedgerService({
   repository,
-  provider: new DeterministicPaymentProviderAdapter(),
+  provider: new HttpPaymentProviderAdapter(process.env.PSP_SANDBOX_URL ?? 'http://localhost:3002'),
 });
 const dependencies = { repository, ledgerService };
+
+const recoveryQueue = new Queue<RecoveryJobData>(queueNames.recovery, { connection });
+const stopScanner = await startRecoveryScanner(pool, recoveryQueue);
 
 const recoveryWorker = new Worker<RecoveryJobData>(
   queueNames.recovery,
@@ -42,7 +46,7 @@ const reconciliationWorker = new Worker<ReconciliationJobData>(
 );
 const webhookWorker = new Worker<WebhookJobData>(
   queueNames.webhooks,
-  async (job) => await processWebhookJob(job.data),
+  async (job) => await processWebhookJob(job.data, dependencies),
   { connection, concurrency: 4 },
 );
 const workers = [recoveryWorker, reconciliationWorker, webhookWorker];
@@ -56,6 +60,7 @@ for (const worker of workers) {
 async function shutdown(signal: string): Promise<void> {
   logger.info({ signal }, 'Stopping TRINETRA workers');
   await Promise.all(workers.map(async (worker) => await worker.close()));
+  stopScanner();
   await connection.quit();
   await pool.end();
 }

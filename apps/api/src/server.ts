@@ -1,6 +1,6 @@
 import { apiEnvSchema } from '@trinetra/config';
 import { createDatabase, ensureTenant, PostgresPaymentLedgerRepository } from '@trinetra/database';
-import { DeterministicPaymentProviderAdapter } from '@trinetra/payment-core';
+import { HttpPaymentProviderAdapter } from '@trinetra/payment-core';
 
 import { buildApp } from './app.js';
 
@@ -16,7 +16,9 @@ const app = await buildApp({
   partnerSecret: env.DEMO_PARTNER_SECRET,
   logLevel: env.LOG_LEVEL,
   ledgerRepository: new PostgresPaymentLedgerRepository(pool),
-  paymentProvider: new DeterministicPaymentProviderAdapter(),
+  paymentProvider: new HttpPaymentProviderAdapter(
+    process.env.PSP_SANDBOX_URL ?? 'http://localhost:3002',
+  ),
   tenantId: env.DEMO_TENANT_ID,
   providerCallbackSecret: env.DEMO_PARTNER_SECRET,
   logger: true,

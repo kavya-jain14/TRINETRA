@@ -159,6 +159,7 @@ export interface PaymentLedgerRepository {
   listStateEvents(tenantId: string, paymentId: string): Promise<PaymentStateEventRecord[]>;
   listOutboxEvents(tenantId: string, paymentId: string): Promise<OutboxEventRecord[]>;
   listProviderAttempts(tenantId: string, paymentId: string): Promise<ProviderAttemptRecord[]>;
+  markOutboxEventPublished(tenantId: string, eventId: string): Promise<void>;
 }
 
 export class PaymentNotFoundError extends Error {

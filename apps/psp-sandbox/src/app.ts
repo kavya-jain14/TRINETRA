@@ -25,6 +25,12 @@ const initialStatus = {
   INVALID_SIGNATURE_CALLBACK: 'SUCCEEDED',
 } as const;
 
+interface SyntheticPayment {
+  scenario: string;
+  inquiryCount: number;
+}
+const sandboxState = new Map<string, SyntheticPayment>();
+
 export interface PspSandboxConfig {
   callbackSecret: string;
   now?: () => Date;
@@ -48,11 +54,14 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
       });
     }
 
+    const providerReference = `psp_${parsed.data.payment_id.slice(3)}`;
+    sandboxState.set(providerReference, { scenario: parsed.data.scenario, inquiryCount: 0 });
+
     const eventId = `pe_${randomUUID().replaceAll('-', '')}`;
     const providerEvent = ProviderCallbackSchema.parse({
       event_id: eventId,
       payment_id: parsed.data.payment_id,
-      provider_ref: `psp_${parsed.data.payment_id.slice(3)}`,
+      provider_ref: providerReference,
       status: initialStatus[parsed.data.scenario],
       amount_paise: parsed.data.amount_paise,
       occurred_at: now().toISOString(),
@@ -79,6 +88,39 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
           'x-nonce': eventId,
           'x-signature': signature,
         },
+      },
+    });
+  });
+
+  app.post('/v1/inquire', async (request, reply) => {
+    const { providerRequestReference, requestReference } = request.body as {
+      providerRequestReference: string;
+      requestReference: string;
+    };
+    const payment = sandboxState.get(providerRequestReference);
+    if (!payment) {
+      return reply.code(200).send({
+        providerStatus: 'PENDING',
+        responseCode: 'UNKNOWN_REFERENCE',
+        providerReference: providerRequestReference,
+        evidence: { inquiry_request_ref: requestReference },
+      });
+    }
+
+    payment.inquiryCount += 1;
+    let providerStatus: string = initialStatus[payment.scenario as keyof typeof initialStatus];
+    if (payment.scenario === 'PENDING_THEN_SUCCESS') providerStatus = 'SUCCEEDED';
+    if (payment.scenario === 'PENDING_THEN_REVERSED') {
+      providerStatus = payment.inquiryCount === 1 ? 'REVERSAL_PENDING' : 'REVERSED';
+    }
+
+    return reply.code(200).send({
+      providerStatus,
+      responseCode: 'SYNTHETIC_STATUS',
+      providerReference: providerRequestReference,
+      evidence: {
+        inquiry_request_ref: requestReference,
+        inquiry_number: payment.inquiryCount,
       },
     });
   });

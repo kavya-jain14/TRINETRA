@@ -21,7 +21,11 @@ export async function processRecoveryJob(
   if (!payment) throw new PaymentNotFoundError(data.paymentId);
 
   if (data.operation === 'STATUS_CHECK') {
-    if (payment.state !== 'PENDING') return { outcome: 'NOOP', state: payment.state } as const;
+    // Allow recovery from SUBMITTED state too: a crash between prepareProviderAttempt
+    // (which sets state = SUBMITTED) and the provider response leaves the payment stuck.
+    if (payment.state !== 'PENDING' && payment.state !== 'SUBMITTED') {
+      return { outcome: 'NOOP', state: payment.state } as const;
+    }
     const result = await dependencies.ledgerService.inquirePendingPayment(
       data.tenantId,
       data.paymentId,
@@ -72,7 +76,8 @@ export async function processReconciliationJob(
   return { outcome: 'RECONCILED', state: result.payment.state } as const;
 }
 
-export async function processWebhookJob(data: WebhookJobData) {
+export async function processWebhookJob(data: WebhookJobData, dependencies: ProcessorDependencies) {
+  await dependencies.repository.markOutboxEventPublished(data.tenantId, data.outboxEventId);
   return {
     outcome: 'READY_FOR_SIGNED_DELIVERY',
     tenantId: data.tenantId,

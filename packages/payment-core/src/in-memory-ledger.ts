@@ -132,7 +132,10 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
   readonly #stateEvents = new Map<string, PaymentStateEventRecord[]>();
   readonly #outboxEvents = new Map<string, OutboxEventRecord[]>();
   readonly #attempts = new Map<string, ProviderAttemptRecord>();
-  readonly #providerEvents = new Set<string>();
+  readonly #providerEvents = new Map<
+    string,
+    { payloadHash: string; providerStatus: string; providerReference: string }
+  >();
   readonly #recoveryClocks = new Map<string, RecoveryClockRecord>();
   #failNextOutbox = false;
 
@@ -240,8 +243,8 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
 
     if (input.operation === 'SUBMIT') {
       assertPaymentTransition(payment.state, 'SUBMITTED');
-    } else if (payment.state !== 'PENDING') {
-      throw new Error(`Status inquiry requires PENDING, received ${payment.state}.`);
+    } else if (payment.state !== 'PENDING' && payment.state !== 'SUBMITTED') {
+      throw new Error(`Status inquiry requires PENDING or SUBMITTED, received ${payment.state}.`);
     }
 
     this.#assertOutboxAvailable();
@@ -330,16 +333,35 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
   async applyProviderEvent(input: ApplyProviderEventInput): Promise<ProviderEventResult> {
     const providerEventKey = `${input.tenantId}:${input.provider}:${input.providerEventId}`;
     const payment = this.#requirePayment(input.tenantId, input.paymentId);
-    if (this.#providerEvents.has(providerEventKey)) {
+    const existing = this.#providerEvents.get(providerEventKey);
+    if (existing) {
+      // Detect mutated re-deliveries (different payload = fraud/error)
+      if (
+        existing.payloadHash !== input.payloadHash ||
+        existing.providerStatus !== input.providerStatus ||
+        existing.providerReference !== input.providerReference
+      ) {
+        throw new ProviderPayloadMismatchError();
+      }
       return { outcome: 'DUPLICATE', payment: clonePayment(payment) };
     }
     if (payment.amountPaise !== input.amountPaise) throw new ProviderPayloadMismatchError();
+    if (
+      payment.providerRequestReference &&
+      payment.providerRequestReference !== input.providerReference
+    ) {
+      throw new ProviderPayloadMismatchError();
+    }
 
     const canApply =
       payment.state === input.providerStatus ||
       canTransitionPayment(payment.state, input.providerStatus);
     if (canApply && payment.state !== input.providerStatus) this.#assertOutboxAvailable();
-    this.#providerEvents.add(providerEventKey);
+    this.#providerEvents.set(providerEventKey, {
+      payloadHash: input.payloadHash,
+      providerStatus: input.providerStatus,
+      providerReference: input.providerReference,
+    });
 
     if (!canApply) {
       return { outcome: 'IGNORED_STALE', payment: clonePayment(payment) };
@@ -394,6 +416,16 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
     return [...this.#attempts.values()]
       .filter((attempt) => attempt.tenantId === tenantId && attempt.paymentId === paymentId)
       .map(cloneAttempt);
+  }
+
+  async markOutboxEventPublished(tenantId: string, eventId: string): Promise<void> {
+    for (const events of this.#outboxEvents.values()) {
+      const event = events.find((e) => e.tenantId === tenantId && e.id === eventId);
+      if (event) {
+        event.publishedAt = new Date();
+        break;
+      }
+    }
   }
 
   #requirePayment(tenantId: string, paymentId: string): PaymentIntentRecord {

@@ -59,11 +59,23 @@ export async function registerPaymentOperationRoutes(
       });
     }
 
+    const idempotencyKey = request.headers['idempotency-key'];
+    if (typeof idempotencyKey !== 'string' || !idempotencyKey) {
+      return reply.code(400).send({
+        error: {
+          code: 'VALIDATION_FAILED',
+          message: 'Missing Idempotency-Key header.',
+          trace_id: `tr_${request.id}`,
+        },
+      });
+    }
+
     try {
       const result = await config.ledgerService.submitPayment(
         config.tenantId,
         params.data.paymentId,
         body.data.scenario,
+        idempotencyKey,
       );
       return reply.code(result.outcome === 'DUPLICATE' ? 200 : 202).send(
         PaymentOperationResultSchema.parse({

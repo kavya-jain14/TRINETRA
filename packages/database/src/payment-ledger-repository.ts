@@ -301,8 +301,8 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
 
       if (input.operation === 'SUBMIT') {
         assertPaymentTransition(payment.state, 'SUBMITTED');
-      } else if (payment.state !== 'PENDING') {
-        throw new Error(`Status inquiry requires PENDING, received ${payment.state}.`);
+      } else if (payment.state !== 'PENDING' && payment.state !== 'SUBMITTED') {
+        throw new Error(`Status inquiry requires PENDING or SUBMITTED, received ${payment.state}.`);
       }
 
       const attemptResult = await client.query<ProviderAttemptRow>(
@@ -425,6 +425,12 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
     return await this.#transaction(async (client) => {
       const payment = await this.#requirePayment(client, input.tenantId, input.paymentId, true);
       if (payment.amount_paise !== input.amountPaise) throw new ProviderPayloadMismatchError();
+      if (
+        payment.provider_request_reference &&
+        payment.provider_request_reference !== input.providerReference
+      ) {
+        throw new ProviderPayloadMismatchError();
+      }
 
       const inserted = await client.query<{ id: string } & QueryResultRow>(
         `INSERT INTO provider_events (
@@ -449,6 +455,27 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
         ],
       );
       if (inserted.rowCount === 0) {
+        const existing = await client.query<
+          {
+            payload_hash: string;
+            provider_status: string;
+            provider_reference: string;
+          } & QueryResultRow
+        >(
+          `SELECT payload_hash, provider_status, provider_reference FROM provider_events
+           WHERE tenant_id = $1 AND provider = $2 AND provider_event_id = $3`,
+          [input.tenantId, input.provider, input.providerEventId],
+        );
+        if (existing.rows[0]) {
+          const row = existing.rows[0];
+          if (
+            row.payload_hash !== input.payloadHash ||
+            row.provider_status !== input.providerStatus ||
+            row.provider_reference !== input.providerReference
+          ) {
+            throw new ProviderPayloadMismatchError();
+          }
+        }
         return { outcome: 'DUPLICATE', payment: toPayment(payment) };
       }
 
@@ -541,6 +568,13 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
       createdAt: asDate(row.created_at),
       publishedAt: asNullableDate(row.published_at),
     }));
+  }
+
+  async markOutboxEventPublished(tenantId: string, eventId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE outbox_events SET published_at = $3 WHERE tenant_id = $1 AND id = $2`,
+      [tenantId, eventId, new Date()],
+    );
   }
 
   async listProviderAttempts(

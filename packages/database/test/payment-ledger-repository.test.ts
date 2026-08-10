@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { DataType, newDb } from 'pg-mem';
 import type { Pool } from 'pg';
@@ -17,134 +19,29 @@ const tenantA = '00000000-0000-4000-8000-000000000001';
 const tenantB = '00000000-0000-4000-8000-000000000002';
 const fixedNow = new Date('2026-08-10T12:00:00.000Z');
 
-const testSchema = `
-  CREATE TYPE payment_state AS ENUM (
-    'CREATED', 'RISK_EVALUATING', 'ALLOWED', 'CHALLENGED', 'BLOCKED', 'SUBMITTED',
-    'PENDING', 'SUCCEEDED', 'FAILED_SOFT', 'FAILED_HARD', 'REVERSAL_PENDING',
-    'REVERSED', 'DISPUTED', 'CLOSED'
-  );
-  CREATE TYPE risk_decision AS ENUM ('ALLOW', 'WARN', 'STEP_UP', 'BLOCK');
-  CREATE TYPE provider_payment_status AS ENUM (
-    'PENDING', 'SUCCEEDED', 'FAILED_SOFT', 'FAILED_HARD', 'REVERSAL_PENDING', 'REVERSED'
-  );
-  CREATE TYPE provider_attempt_operation AS ENUM ('SUBMIT', 'STATUS_INQUIRY');
-  CREATE TYPE provider_attempt_status AS ENUM ('STARTED', 'COMPLETED', 'UNKNOWN');
+const sql0 = readFileSync(
+  resolve(import.meta.dirname, '../drizzle/0000_white_red_ghost.sql'),
+  'utf-8',
+);
+const sql1 = readFileSync(
+  resolve(import.meta.dirname, '../drizzle/0001_free_supreme_intelligence.sql'),
+  'utf-8',
+);
 
-  CREATE TABLE tenants (
-    id uuid PRIMARY KEY,
-    slug text NOT NULL UNIQUE,
-    name text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now()
-  );
-  CREATE TABLE payment_intents (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id uuid NOT NULL REFERENCES tenants(id),
-    partner_customer_ref text NOT NULL,
-    external_ref text NOT NULL,
-    idempotency_key text NOT NULL,
-    request_hash text NOT NULL,
-    request_body jsonb NOT NULL,
-    response_body jsonb NOT NULL,
-    amount_paise integer NOT NULL,
-    currency text NOT NULL DEFAULT 'INR',
-    state payment_state NOT NULL DEFAULT 'CREATED',
-    decision risk_decision,
-    provider_request_reference text,
-    resource_version integer NOT NULL DEFAULT 1,
-    submitted_at timestamptz,
-    pending_since timestamptz,
-    completed_at timestamptz,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    UNIQUE (tenant_id, id),
-    UNIQUE (tenant_id, external_ref),
-    UNIQUE (tenant_id, idempotency_key),
-    UNIQUE (tenant_id, provider_request_reference)
-  );
-  CREATE TABLE idempotency_records (
-    tenant_id uuid NOT NULL REFERENCES tenants(id),
-    operation text NOT NULL,
-    key text NOT NULL,
-    request_hash text NOT NULL,
-    payment_external_ref text NOT NULL,
-    response_body jsonb,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    expires_at timestamptz NOT NULL,
-    PRIMARY KEY (tenant_id, operation, key)
-  );
-  CREATE TABLE payment_state_events (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id uuid NOT NULL REFERENCES tenants(id),
-    payment_intent_id uuid NOT NULL,
-    event_key text NOT NULL,
-    from_state payment_state,
-    to_state payment_state NOT NULL,
-    source text NOT NULL,
-    evidence jsonb NOT NULL DEFAULT '{}',
-    resource_version integer NOT NULL,
-    occurred_at timestamptz NOT NULL DEFAULT now(),
-    FOREIGN KEY (tenant_id, payment_intent_id) REFERENCES payment_intents(tenant_id, id),
-    UNIQUE (tenant_id, payment_intent_id, event_key)
-  );
-  CREATE TABLE outbox_events (
-    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id uuid NOT NULL REFERENCES tenants(id),
-    aggregate_type text NOT NULL,
-    aggregate_id uuid NOT NULL,
-    event_key text NOT NULL,
-    event_type text NOT NULL,
-    payload jsonb NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    available_at timestamptz NOT NULL DEFAULT now(),
-    publish_attempts integer NOT NULL DEFAULT 0,
-    published_at timestamptz,
-    UNIQUE (tenant_id, event_key)
-  );
-  CREATE TABLE provider_attempts (
-    id text PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES tenants(id),
-    payment_intent_id uuid NOT NULL,
-    provider text NOT NULL,
-    operation provider_attempt_operation NOT NULL,
-    request_reference text NOT NULL,
-    request_hash text NOT NULL,
-    status provider_attempt_status NOT NULL DEFAULT 'STARTED',
-    provider_status provider_payment_status,
-    response_code text,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    completed_at timestamptz,
-    FOREIGN KEY (tenant_id, payment_intent_id) REFERENCES payment_intents(tenant_id, id),
-    UNIQUE (tenant_id, provider, request_reference)
-  );
-  CREATE TABLE provider_events (
-    id text PRIMARY KEY,
-    tenant_id uuid NOT NULL REFERENCES tenants(id),
-    payment_intent_id uuid NOT NULL,
-    provider text NOT NULL,
-    provider_event_id text NOT NULL,
-    provider_reference text NOT NULL,
-    provider_status provider_payment_status NOT NULL,
-    payload_hash text NOT NULL,
-    amount_paise integer NOT NULL,
-    applied boolean NOT NULL DEFAULT false,
-    occurred_at timestamptz NOT NULL,
-    received_at timestamptz NOT NULL DEFAULT now(),
-    FOREIGN KEY (tenant_id, payment_intent_id) REFERENCES payment_intents(tenant_id, id),
-    UNIQUE (tenant_id, provider, provider_event_id)
-  );
-  CREATE TABLE payment_recovery_clocks (
-    tenant_id uuid NOT NULL REFERENCES tenants(id),
-    payment_intent_id uuid NOT NULL,
-    status_check_due_at timestamptz,
-    pending_expires_at timestamptz,
-    reversal_due_at timestamptz,
-    complaint_eligible_at timestamptz,
-    resolved_at timestamptz,
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant_id, payment_intent_id),
-    FOREIGN KEY (tenant_id, payment_intent_id) REFERENCES payment_intents(tenant_id, id)
-  );
-`;
+/**
+ * pg-mem supports very few SQL functions (no replace(), md5(), jsonb_build_object()).
+ * The UPDATE data-migration blocks in migration 0001 use those functions but operate
+ * on rows that don't exist in a fresh test DB, so we can safely strip them.
+ * We split on the Drizzle statement-breakpoint marker, drop any UPDATE statements,
+ * then re-join so each statement ends with exactly one semicolon.
+ */
+function forPgMem(sql: string): string {
+  return sql
+    .split('--> statement-breakpoint')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0 && !/^\s*UPDATE\s/i.test(s))
+    .join('\n');
+}
 
 const pools: Pool[] = [];
 
@@ -156,7 +53,8 @@ async function buildHarness() {
     impure: true,
     implementation: randomUUID,
   });
-  memory.public.none(testSchema);
+  memory.public.none(forPgMem(sql0));
+  memory.public.none(forPgMem(sql1));
   const adapter = memory.adapters.createPg();
   const pool = new adapter.Pool() as Pool;
   pools.push(pool);
