@@ -1,0 +1,37 @@
+{
+  "name": "trinetra",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Explainable UPI fraud-prevention and payment-resilience gateway",
+  "packageManager": "pnpm@11.16.0",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --if-present run build",
+    "build:packages": "pnpm --filter './packages/**' -r --if-present run build",
+    "clean": "pnpm -r --if-present run clean",
+    "db:migration:check": "pnpm --filter @trinetra/database db:check",
+    "dev": "pnpm build:packages && pnpm --parallel --filter @trinetra/api --filter @trinetra/web --filter @trinetra/consumer-demo --filter @trinetra/psp-sandbox run dev",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "infra:down": "docker compose --env-file .env -f infra/docker-compose.yml down",
+    "infra:up": "docker compose --env-file .env -f infra/docker-compose.yml up -d --wait",
+    "lint": "eslint .",
+    "security:check": "node scripts/security-check.mjs",
+    "test": "pnpm build:packages && pnpm -r --if-present run test",
+    "test:integration": "pnpm build:packages && pnpm --filter @trinetra/api run test:integration",
+    "typecheck": "pnpm -r --if-present run typecheck",
+    "verify": "pnpm format:check && pnpm lint --max-warnings=0 && pnpm typecheck && pnpm test && pnpm test:integration && pnpm build && pnpm db:migration:check && pnpm security:check"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "26.2.0",
+    "eslint": "10.8.1",
+    "prettier": "3.9.6",
+    "tsx": "4.23.12",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.66.0",
+    "vitest": "4.1.10"
+  }
+}

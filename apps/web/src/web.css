@@ -1,0 +1,130 @@
+.command-center {
+  max-width: 1440px;
+  margin: 0 auto;
+}
+
+.topbar,
+.section-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+h1 {
+  max-width: 760px;
+  margin: 0.55rem 0 2.3rem;
+  font-size: clamp(2.4rem, 6vw, 5.6rem);
+  line-height: 0.95;
+  letter-spacing: -0.06em;
+}
+
+h2 {
+  margin: 0.4rem 0 0;
+  font-size: clamp(1.5rem, 3vw, 2.2rem);
+}
+
+.foundation-status,
+.contract-chip {
+  white-space: nowrap;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.decision-grid {
+  display: grid;
+  grid-template-columns: 1.25fr repeat(3, 1fr);
+  gap: 1rem;
+}
+
+.decision-card,
+.lens-card {
+  min-height: 190px;
+  padding: 1.4rem;
+}
+
+.decision-card {
+  border-color: color-mix(in srgb, var(--safe), var(--line) 45%);
+}
+
+.decision-card strong {
+  display: block;
+  margin-top: 1rem;
+  color: var(--safe);
+  font-size: clamp(2.4rem, 5vw, 4.2rem);
+}
+
+.decision-label,
+.lens-card span {
+  color: var(--muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.lens-card strong {
+  display: block;
+  margin: 0.75rem 0;
+  font-size: 3.4rem;
+  line-height: 1;
+}
+
+.decision-card p,
+.lens-card p {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.timeline-panel {
+  margin-top: 1rem;
+  padding: clamp(1.25rem, 3vw, 2.2rem);
+}
+
+.timeline-list {
+  margin-top: 1.8rem;
+  border-top: 1px solid var(--line);
+}
+
+.timeline-row {
+  display: grid;
+  grid-template-columns: 8rem 1fr auto;
+  gap: 1.5rem;
+  padding: 1rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.timeline-row time,
+.timeline-row strong {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+@media (max-width: 900px) {
+  .decision-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .topbar,
+  .section-heading {
+    display: block;
+  }
+
+  .foundation-status,
+  .contract-chip {
+    display: inline-block;
+    margin-bottom: 1rem;
+    white-space: normal;
+  }
+
+  .decision-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .timeline-row {
+    grid-template-columns: 1fr;
+    gap: 0.35rem;
+  }
+}

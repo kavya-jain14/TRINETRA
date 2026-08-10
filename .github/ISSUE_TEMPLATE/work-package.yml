@@ -1,0 +1,34 @@
+name: Work package
+description: Plan one TRINETRA delivery slice with explicit contracts and evidence.
+title: '[Package] '
+labels: ['work-package']
+body:
+  - type: input
+    id: owner
+    attributes:
+      label: Owner
+      placeholder: Kavya / Fuzail / Aryan / Lakshya / Keerti
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Demo-visible outcome
+    validations:
+      required: true
+  - type: textarea
+    id: contracts
+    attributes:
+      label: Contracts, data, and security impact
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance checks
+      value: |
+        - [ ] Tests cover the owned behavior
+        - [ ] Relevant docs/contracts updated
+        - [ ] `pnpm verify` passes
+    validations:
+      required: true

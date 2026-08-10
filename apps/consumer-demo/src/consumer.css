@@ -1,0 +1,88 @@
+.consumer-shell {
+  display: grid;
+  place-items: center;
+}
+
+.consumer-shell > .eyebrow {
+  position: fixed;
+  top: 1.5rem;
+  left: 1.5rem;
+}
+
+.payment-card {
+  width: min(100%, 480px);
+  padding: clamp(1.5rem, 5vw, 3rem);
+  text-align: center;
+}
+
+.merchant-mark {
+  display: grid;
+  width: 4rem;
+  height: 4rem;
+  margin: 0 auto 1.2rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: var(--surface);
+  color: var(--risk);
+  font-weight: 900;
+}
+
+.muted,
+.foundation-note {
+  color: var(--muted);
+}
+
+.payment-card h1 {
+  margin: 0.3rem 0 1.5rem;
+  font-size: clamp(1.7rem, 7vw, 2.7rem);
+}
+
+.amount {
+  font-size: clamp(3.8rem, 16vw, 6.5rem);
+  font-weight: 800;
+  letter-spacing: -0.07em;
+}
+
+.payment-facts {
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.payment-facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.payment-facts dt {
+  color: var(--muted);
+}
+
+.payment-facts dd {
+  margin: 0;
+  text-align: right;
+}
+
+.payment-card button {
+  width: 100%;
+  padding: 1rem;
+  border: 0;
+  border-radius: 0.9rem;
+  background: var(--safe);
+  color: #06160f;
+  font-weight: 800;
+}
+
+.payment-card button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.foundation-note {
+  margin: 1rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}

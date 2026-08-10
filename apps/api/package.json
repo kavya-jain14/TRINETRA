@@ -1,0 +1,29 @@
+{
+  "name": "@trinetra/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --env-file-if-exists=../../.env --import tsx --watch src/server.ts",
+    "start": "node --env-file-if-exists=../../.env dist/server.js",
+    "test": "vitest run test/app.test.ts",
+    "test:integration": "vitest run test/app.test.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@trinetra/config": "workspace:*",
+    "@trinetra/contracts": "workspace:*",
+    "@trinetra/observability": "workspace:*",
+    "@trinetra/risk-core": "workspace:*",
+    "@trinetra/security": "workspace:*",
+    "fastify": "catalog:",
+    "zod": "catalog:"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "tsx": "4.23.12",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
