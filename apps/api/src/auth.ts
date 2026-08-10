@@ -22,6 +22,12 @@ export interface AuthenticatedPartnerRequest {
   requestHash: string;
 }
 
+export interface ProviderCallbackAuthConfig {
+  providerSecret: string;
+  now: () => Date;
+  clockSkewSeconds: number;
+}
+
 function header(request: FastifyRequest, name: string): string | undefined {
   const value = request.headers[name];
   return Array.isArray(value) ? value[0] : value;
@@ -79,7 +85,7 @@ export async function authenticatePartnerRequest(
     config.partnerSecret,
     {
       method: request.method,
-      path: request.routeOptions.url ?? request.url,
+      path: request.url.split('?')[0] ?? request.url,
       timestamp,
       nonce,
       body,
@@ -97,4 +103,52 @@ export async function authenticatePartnerRequest(
   }
 
   return { idempotencyKey, partnerKey, requestHash: sha256Hex(body) };
+}
+
+export function authenticateProviderCallback(
+  request: FastifyRequest,
+  reply: FastifyReply,
+  config: ProviderCallbackAuthConfig,
+): { requestHash: string } | undefined {
+  const timestamp = header(request, 'x-timestamp');
+  const nonce = header(request, 'x-nonce');
+  const signature = header(request, 'x-signature');
+  if (!timestamp || !nonce || !signature) {
+    sendAuthError(request, reply, 'AUTH_REQUIRED', 'Signed provider headers are required.');
+    return undefined;
+  }
+
+  const timestampSeconds = Number(timestamp);
+  const nowSeconds = Math.floor(config.now().getTime() / 1000);
+  if (
+    !Number.isSafeInteger(timestampSeconds) ||
+    Math.abs(nowSeconds - timestampSeconds) > config.clockSkewSeconds
+  ) {
+    sendAuthError(
+      request,
+      reply,
+      'STALE_REQUEST',
+      'Provider callback timestamp is outside the allowed window.',
+    );
+    return undefined;
+  }
+
+  const body = canonicalJson(request.body ?? {});
+  const valid = verifyPartnerSignature(
+    config.providerSecret,
+    {
+      method: request.method,
+      path: request.url.split('?')[0] ?? request.url,
+      timestamp,
+      nonce,
+      body,
+    },
+    signature,
+  );
+  if (!valid) {
+    sendAuthError(request, reply, 'INVALID_SIGNATURE', 'Provider authentication failed.');
+    return undefined;
+  }
+
+  return { requestHash: sha256Hex(body) };
 }

@@ -3,25 +3,14 @@ import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
+import { ProviderCallbackSchema, ProviderScenarioSchema } from '@trinetra/contracts';
 import { createLoggerOptions } from '@trinetra/observability';
 import { canonicalJson, signPartnerRequest } from '@trinetra/security';
 
 const SimulatorRequestSchema = z.object({
-  payment_id: z.string().min(4),
+  payment_id: z.string().startsWith('pi_').max(96),
   amount_paise: z.number().int().positive(),
-  scenario: z
-    .enum([
-      'SUCCESS_IMMEDIATE',
-      'PENDING_THEN_SUCCESS',
-      'PENDING_THEN_REVERSED',
-      'SOFT_DECLINE',
-      'HARD_DECLINE',
-      'TIMEOUT_UNKNOWN',
-      'DUPLICATE_CALLBACK',
-      'OUT_OF_ORDER_CALLBACK',
-      'INVALID_SIGNATURE_CALLBACK',
-    ])
-    .default('SUCCESS_IMMEDIATE'),
+  scenario: ProviderScenarioSchema.default('SUCCESS_IMMEDIATE'),
 });
 
 const initialStatus = {
@@ -60,14 +49,14 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
     }
 
     const eventId = `pe_${randomUUID().replaceAll('-', '')}`;
-    const providerEvent = {
+    const providerEvent = ProviderCallbackSchema.parse({
       event_id: eventId,
       payment_id: parsed.data.payment_id,
-      provider_ref: `psp_${parsed.data.payment_id}`,
+      provider_ref: `psp_${parsed.data.payment_id.slice(3)}`,
       status: initialStatus[parsed.data.scenario],
       amount_paise: parsed.data.amount_paise,
       occurred_at: now().toISOString(),
-    };
+    });
     const body = canonicalJson(providerEvent);
     const timestamp = String(Math.floor(now().getTime() / 1000));
     const callbackPath = '/v1/provider-events/trinetra-sandbox';

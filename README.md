@@ -4,17 +4,17 @@ TRINETRA is an explainable control layer for UPI partners. It combines three pre
 
 This repository is a synthetic-only SIH prototype. It does not connect to NPCI or a bank, handle UPI PINs, move real money, or claim production fraud accuracy.
 
-## Foundation status
+## Platform status
 
-Phase 0A establishes:
+Phase 0A establishes the monorepo, contracts, secure partner boundary, deterministic risk engine,
+UI shells, CI, and local infrastructure. Package 0B now adds:
 
-- React/Vite operations and consumer shells;
-- Fastify API and deterministic PSP sandbox shells;
-- Zod contracts and generated OpenAPI document;
-- partner HMAC signing, timestamp, nonce, and idempotency boundaries;
-- deterministic three-eye risk decision and payment-state machine packages;
-- Drizzle/PostgreSQL schema start, Redis/BullMQ worker shell, and Docker Compose;
-- CI, CODEOWNERS, PR template, security check, and team workflow.
+- a tenant-scoped PostgreSQL payment-intent and idempotency repository;
+- append-only state/provider history and an atomic transactional outbox;
+- submit-once deterministic PSP adapter behavior;
+- authenticated, idempotent provider callbacks that cannot regress state;
+- status-first pending recovery, reversal/complaint clocks, and BullMQ processors;
+- repository, domain-property, API integration, and worker recovery tests.
 
 ## Quick start
 
@@ -25,6 +25,7 @@ cp .env.example .env
 corepack enable
 pnpm install
 pnpm infra:up
+pnpm db:migrate
 pnpm dev
 ```
 
@@ -41,10 +42,14 @@ Run the complete local quality gate with `pnpm verify`.
 
 ## Repository map
 
-See [Architecture](docs/ARCHITECTURE.md), [API and events](docs/API_AND_EVENTS.md), and [team workflow](docs/TEAM_WORKFLOW.md). The full locked product plan is in [the master blueprint](docs/MASTER_BLUEPRINT.md).
+See [Architecture](docs/ARCHITECTURE.md), [API and events](docs/API_AND_EVENTS.md),
+[Package 0B payment ledger](docs/PAYMENT_LEDGER_0B.md), and
+[team workflow](docs/TEAM_WORKFLOW.md). The full locked product plan is in
+[the master blueprint](docs/MASTER_BLUEPRINT.md).
 
 ## First integration checkpoint
 
 Consumer demo creates a synthetic ₹249 trusted-merchant intent → API returns three low scores and `ALLOW` → PSP sandbox returns signed success → operations console displays one immutable payment timeline.
 
-The current foundation implements and tests the secure decision boundary. Durable ledger submission and live UI wiring follow in Packages 0B/0C and Phase 1.
+The backend now implements and tests this decision-to-ledger-to-provider flow. Package 0C wires
+the operations and consumer interfaces to the published contracts.

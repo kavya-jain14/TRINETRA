@@ -14,7 +14,9 @@
   "dependencies": {
     "@trinetra/config": "workspace:*",
     "@trinetra/contracts": "workspace:*",
+    "@trinetra/database": "workspace:*",
     "@trinetra/observability": "workspace:*",
+    "@trinetra/payment-core": "workspace:*",
     "@trinetra/risk-core": "workspace:*",
     "@trinetra/security": "workspace:*",
     "fastify": "catalog:",
