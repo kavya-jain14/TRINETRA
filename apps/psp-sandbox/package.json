@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@trinetra/config": "workspace:*",
+    "@trinetra/contracts": "workspace:*",
     "@trinetra/observability": "workspace:*",
     "@trinetra/security": "workspace:*",
     "fastify": "catalog:",

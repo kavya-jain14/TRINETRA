@@ -14,7 +14,7 @@ describe('deterministic PSP sandbox', () => {
       method: 'POST',
       url: '/v1/simulate',
       payload: {
-        payment_id: 'pay_foundation_demo',
+        payment_id: 'pi_foundation_demo',
         amount_paise: 24_900,
         scenario: 'SUCCESS_IMMEDIATE',
       },

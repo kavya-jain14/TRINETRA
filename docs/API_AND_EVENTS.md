@@ -24,11 +24,22 @@ SHA256_HEX(CANONICAL_JSON_BODY)
 
 Canonical JSON recursively sorts object keys, preserves array order, removes properties whose value is `undefined`, rejects non-finite numbers, and emits compact UTF-8 JSON. The reference implementation is `canonicalJson` in `@trinetra/security`.
 
-The server permits five minutes of clock skew. A valid nonce is consumed once per partner. Reusing an idempotency key with the same canonical body returns the original logical result; changing the body returns `IDEMPOTENCY_CONFLICT`.
+The server permits five minutes of clock skew. A valid partner nonce is consumed once. Reusing a
+tenant-scoped payment-intent idempotency key with the same canonical body returns the original
+logical result; changing the body returns `IDEMPOTENCY_CONFLICT`.
 
-## Foundation endpoint
+Provider callbacks use the same canonical HMAC construction without partner or idempotency
+headers. Callback `event_id` is the durable deduplication key so an authenticated redelivery can
+receive a successful `DUPLICATE` acknowledgement.
 
-`POST /v1/payment-intents` validates the published request, evaluates all three risk lenses, and returns the explainable risk contract. The current process-memory persistence is explicit and will be replaced by the Package 0B repository transaction.
+## Payment endpoints
+
+- `POST /v1/payment-intents` evaluates the three risk lenses and atomically creates the intent,
+  initial state event, outbox event, and replay record in PostgreSQL.
+- `POST /v1/payment-intents/{paymentId}/submit` accepts only an eligible payment, persists one
+  stable provider request reference, and never performs a second provider submission.
+- `POST /v1/provider-events/trinetra-sandbox` verifies the provider signature, deduplicates the
+  provider event, and applies only a legal monotonic transition.
 
 Health endpoints are separate:
 
@@ -52,4 +63,7 @@ Unknown errors never include a stack trace or raw provider message.
 
 ## Event discipline
 
-Domain event names are published in `DomainEventTypeSchema`. A durable mutation and its outbox record must commit in the same PostgreSQL transaction. Event consumers are at-least-once and therefore idempotent.
+Domain event names are published in `DomainEventTypeSchema`. A durable mutation, append-only state
+event, and outbox record commit in the same PostgreSQL transaction. Event consumers are
+at-least-once and therefore idempotent. Provider calls occur only after the submission transaction
+commits; unknown outcomes become `PENDING` and schedule status-first recovery.

@@ -2,10 +2,20 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 import { openApiDocument } from '@trinetra/contracts';
 import { createLoggerOptions } from '@trinetra/observability';
+import {
+  DeterministicPaymentProviderAdapter,
+  InMemoryPaymentLedgerRepository,
+  PaymentLedgerService,
+  type PaymentLedgerRepository,
+  type PaymentProviderAdapter,
+} from '@trinetra/payment-core';
 import { InMemoryNonceStore, type NonceStore } from '@trinetra/security';
 
 import { registerHealthRoutes } from './routes/health.js';
 import { registerPaymentIntentRoutes } from './routes/payment-intents.js';
+import { registerPaymentOperationRoutes } from './routes/payment-operations.js';
+
+const defaultTenantId = '00000000-0000-4000-8000-000000000001';
 
 export interface AppConfig {
   partnerKey: string;
@@ -13,6 +23,10 @@ export interface AppConfig {
   logLevel?: string;
   now?: () => Date;
   nonceStore?: NonceStore;
+  ledgerRepository?: PaymentLedgerRepository;
+  paymentProvider?: PaymentProviderAdapter;
+  tenantId?: string;
+  providerCallbackSecret?: string;
   logger?: boolean;
 }
 
@@ -25,8 +39,17 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 
   const now = config.now ?? (() => new Date());
   const nonceStore = config.nonceStore ?? new InMemoryNonceStore();
+  const provider = config.paymentProvider ?? new DeterministicPaymentProviderAdapter();
+  const ledgerService = new PaymentLedgerService({
+    repository: config.ledgerRepository ?? new InMemoryPaymentLedgerRepository(),
+    provider,
+    now,
+  });
+  const tenantId = config.tenantId ?? defaultTenantId;
 
-  await registerHealthRoutes(app);
+  await registerHealthRoutes(app, {
+    persistence: config.ledgerRepository ? 'postgresql' : 'in-memory-test-adapter',
+  });
   app.get('/openapi.json', async () => openApiDocument);
   await registerPaymentIntentRoutes(app, {
     partnerKey: config.partnerKey,
@@ -34,7 +57,18 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     nonceStore,
     now,
     clockSkewSeconds: 300,
-    idempotencyEntries: new Map(),
+    ledgerService,
+    tenantId,
+  });
+  await registerPaymentOperationRoutes(app, {
+    partnerKey: config.partnerKey,
+    partnerSecret: config.partnerSecret,
+    providerCallbackSecret: config.providerCallbackSecret ?? config.partnerSecret,
+    nonceStore,
+    now,
+    clockSkewSeconds: 300,
+    ledgerService,
+    tenantId,
   });
 
   app.setNotFoundHandler((request, reply) =>

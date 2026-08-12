@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { canonicalJson, signPartnerRequest } from '@trinetra/security';
+import { InMemoryPaymentLedgerRepository } from '@trinetra/payment-core';
 
 import { buildApp } from '../src/app.js';
 
@@ -24,7 +25,12 @@ const trustedIntent = {
   },
 } as const;
 
-function signedHeaders(body: object, nonce: string, idempotencyKey = 'idem_demo_001') {
+function signedHeaders(
+  body: object,
+  nonce: string,
+  idempotencyKey = 'idem_demo_001',
+  path = '/v1/payment-intents',
+) {
   const timestamp = String(Math.floor(fixedNow.getTime() / 1000));
   const canonicalBody = canonicalJson(body);
   return {
@@ -35,10 +41,26 @@ function signedHeaders(body: object, nonce: string, idempotencyKey = 'idem_demo_
     'x-nonce': nonce,
     'x-signature': signPartnerRequest(partnerSecret, {
       method: 'POST',
-      path: '/v1/payment-intents',
+      path,
       timestamp,
       nonce,
       body: canonicalBody,
+    }),
+  };
+}
+
+function providerHeaders(body: object, nonce: string) {
+  const timestamp = String(Math.floor(fixedNow.getTime() / 1000));
+  return {
+    'content-type': 'application/json',
+    'x-timestamp': timestamp,
+    'x-nonce': nonce,
+    'x-signature': signPartnerRequest(partnerSecret, {
+      method: 'POST',
+      path: '/v1/provider-events/trinetra-sandbox',
+      timestamp,
+      nonce,
+      body: canonicalJson(body),
     }),
   };
 }
@@ -129,6 +151,166 @@ describe('TRINETRA partner API foundation', () => {
     expect(replay.json().payment_intent_id).toBe(first.json().payment_intent_id);
     expect(conflict.statusCode).toBe(409);
     expect(conflict.json().error.code).toBe('IDEMPOTENCY_CONFLICT');
+    await app.close();
+  });
+
+  it('stores a privacy-minimized payment request without cleartext names', async () => {
+    const repository = new InMemoryPaymentLedgerRepository();
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      ledgerRepository: repository,
+    });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/payment-intents',
+      headers: signedHeaders(trustedIntent, 'nonce_privacy_001', 'idem_privacy_001'),
+      payload: trustedIntent,
+    });
+    const payment = await repository.getPayment(
+      '00000000-0000-4000-8000-000000000001',
+      created.json().payment_intent_id,
+    );
+    const stored = JSON.stringify(payment?.requestBody);
+
+    expect(stored).not.toContain('Aarav Electronics');
+    expect(payment?.requestBody).toMatchObject({
+      beneficiary: { vpa_token: 'vpa_tok_trusted_merchant' },
+      merchant: { merchant_ref: 'm_demo_12', mcc: '5732' },
+    });
+    expect(payment?.requestBody).toMatchObject({
+      merchant: { payee_name_matches_merchant: true },
+    });
+    await app.close();
+  });
+
+  it('returns NOT_FOUND instead of INTERNAL_ERROR for an unknown payment submit', async () => {
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+    });
+    const body = { scenario: 'SUCCESS_IMMEDIATE' } as const;
+    const path = '/v1/payment-intents/pi_missing_001/submit';
+    const response = await app.inject({
+      method: 'POST',
+      url: path,
+      headers: signedHeaders(body, 'nonce_missing_001', 'idem_missing_001', path),
+      payload: body,
+    });
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json().error.code).toBe('NOT_FOUND');
+    await app.close();
+  });
+
+  it('submits once, recovers through an authenticated callback, and ignores stale events', async () => {
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+    });
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/payment-intents',
+      headers: signedHeaders(trustedIntent, 'nonce_flow_create', 'idem_flow_001'),
+      payload: trustedIntent,
+    });
+    const paymentId = created.json().payment_intent_id as string;
+    const submitBody = { scenario: 'PENDING_THEN_SUCCESS' } as const;
+    const submitPath = `/v1/payment-intents/${paymentId}/submit`;
+    const submitted = await app.inject({
+      method: 'POST',
+      url: submitPath,
+      headers: signedHeaders(submitBody, 'nonce_flow_submit', 'idem_submit_001', submitPath),
+      payload: submitBody,
+    });
+    expect(submitted.statusCode).toBe(202);
+    expect(submitted.json().payment.state).toBe('PENDING');
+
+    const changedSubmission = { scenario: 'SUCCESS_IMMEDIATE' } as const;
+    const conflict = await app.inject({
+      method: 'POST',
+      url: submitPath,
+      headers: signedHeaders(
+        changedSubmission,
+        'nonce_flow_submit_conflict',
+        'idem_submit_001',
+        submitPath,
+      ),
+      payload: changedSubmission,
+    });
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.json().error.code).toBe('IDEMPOTENCY_CONFLICT');
+
+    const callback = {
+      event_id: 'pe_api_success_001',
+      payment_id: paymentId,
+      provider_ref: `psp_${paymentId.slice(3)}`,
+      status: 'SUCCEEDED',
+      amount_paise: trustedIntent.amount_paise,
+      occurred_at: fixedNow.toISOString(),
+    } as const;
+    const wrongReference = { ...callback, event_id: 'pe_api_wrong_ref', provider_ref: 'psp_wrong' };
+    const rejected = await app.inject({
+      method: 'POST',
+      url: '/v1/provider-events/trinetra-sandbox',
+      headers: providerHeaders(wrongReference, 'nonce_callback_wrong_ref'),
+      payload: wrongReference,
+    });
+    const applied = await app.inject({
+      method: 'POST',
+      url: '/v1/provider-events/trinetra-sandbox',
+      headers: providerHeaders(callback, 'nonce_callback_001'),
+      payload: callback,
+    });
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/v1/provider-events/trinetra-sandbox',
+      headers: providerHeaders(callback, 'nonce_callback_002'),
+      payload: callback,
+    });
+    const stale = { ...callback, event_id: 'pe_api_stale_001', status: 'PENDING' } as const;
+    const ignored = await app.inject({
+      method: 'POST',
+      url: '/v1/provider-events/trinetra-sandbox',
+      headers: providerHeaders(stale, 'nonce_callback_003'),
+      payload: stale,
+    });
+
+    expect(rejected.statusCode).toBe(409);
+    expect(rejected.json().error.code).toBe('VALIDATION_FAILED');
+    expect(applied.statusCode).toBe(202);
+    expect(applied.json()).toMatchObject({ outcome: 'APPLIED', payment: { state: 'SUCCEEDED' } });
+    expect(duplicate.json().outcome).toBe('DUPLICATE');
+    expect(ignored.json()).toMatchObject({
+      outcome: 'IGNORED_STALE',
+      payment: { state: 'SUCCEEDED' },
+    });
+    await app.close();
+  });
+
+  it('rejects an unauthenticated provider callback', async () => {
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/provider-events/trinetra-sandbox',
+      payload: {
+        event_id: 'pe_unsigned_001',
+        payment_id: 'pi_unknown_001',
+        provider_ref: 'psp_unknown_001',
+        status: 'PENDING',
+        amount_paise: 24_900,
+        occurred_at: fixedNow.toISOString(),
+      },
+    });
+    expect(response.statusCode).toBe(401);
+    expect(response.json().error.code).toBe('AUTH_REQUIRED');
     await app.close();
   });
 });

@@ -5,19 +5,47 @@ import type { FastifyInstance } from 'fastify';
 import {
   PaymentIntentRequestSchema,
   RiskAssessmentSchema,
-  type RiskAssessment,
+  type PaymentIntentRequest,
 } from '@trinetra/contracts';
+import {
+  IdempotencyConflictError,
+  type CreatePaymentResult,
+  type PaymentLedgerService,
+} from '@trinetra/payment-core';
 import { evaluatePaymentIntent } from '@trinetra/risk-core';
 
 import { authenticatePartnerRequest, type PartnerAuthConfig } from '../auth.js';
 
-interface IdempotencyEntry {
-  requestHash: string;
-  response: RiskAssessment;
+export interface PaymentIntentRouteConfig extends PartnerAuthConfig {
+  ledgerService: PaymentLedgerService;
+  tenantId: string;
 }
 
-export interface PaymentIntentRouteConfig extends PartnerAuthConfig {
-  idempotencyEntries: Map<string, IdempotencyEntry>;
+function normalizedName(value: string): string {
+  return value.trim().toLocaleLowerCase('en-IN').replace(/\s+/g, ' ');
+}
+
+function privacyMinimizedRequest(input: PaymentIntentRequest) {
+  return {
+    partner_customer_ref: input.partner_customer_ref,
+    direction: input.direction,
+    payment_type: input.payment_type,
+    amount_paise: input.amount_paise,
+    currency: input.currency,
+    beneficiary: {
+      vpa_token: input.beneficiary.vpa_token,
+    },
+    merchant: input.merchant
+      ? {
+          merchant_ref: input.merchant.merchant_ref,
+          payee_name_matches_merchant:
+            normalizedName(input.merchant.expected_name) ===
+            normalizedName(input.beneficiary.resolved_name),
+          mcc: input.merchant.mcc,
+        }
+      : undefined,
+    context: input.context,
+  };
 }
 
 export async function registerPaymentIntentRoutes(
@@ -40,10 +68,32 @@ export async function registerPaymentIntentRoutes(
       });
     }
 
-    const idempotencyScope = `${authentication.partnerKey}:payment-intents:${authentication.idempotencyKey}`;
-    const existing = config.idempotencyEntries.get(idempotencyScope);
-    if (existing) {
-      if (existing.requestHash !== authentication.requestHash) {
+    const opaqueId = randomUUID().replaceAll('-', '');
+    const paymentIntentId = `pi_${opaqueId}`;
+    const evaluated = RiskAssessmentSchema.parse(
+      evaluatePaymentIntent(parsed.data, {
+        now: config.now(),
+        paymentIntentId,
+        traceId: `tr_${request.id}`,
+      }),
+    );
+
+    let result: CreatePaymentResult;
+    try {
+      result = await config.ledgerService.createRiskEvaluatedPayment({
+        paymentId: paymentIntentId,
+        tenantId: config.tenantId,
+        partnerCustomerRef: parsed.data.partner_customer_ref,
+        idempotencyKey: authentication.idempotencyKey,
+        requestHash: authentication.requestHash,
+        requestBody: privacyMinimizedRequest(parsed.data),
+        responseBody: evaluated,
+        amountPaise: parsed.data.amount_paise,
+        currency: parsed.data.currency,
+        decision: evaluated.decision,
+      });
+    } catch (error) {
+      if (error instanceof IdempotencyConflictError) {
         return reply.code(409).send({
           error: {
             code: 'IDEMPOTENCY_CONFLICT',
@@ -52,27 +102,13 @@ export async function registerPaymentIntentRoutes(
           },
         });
       }
-
-      reply.header('x-trace-id', existing.response.trace_id);
-      reply.header('x-resource-version', existing.response.resource_version);
-      return reply.code(200).send(existing.response);
+      throw error;
     }
 
-    const opaqueId = randomUUID().replaceAll('-', '');
-    const response = RiskAssessmentSchema.parse(
-      evaluatePaymentIntent(parsed.data, {
-        now: config.now(),
-        paymentIntentId: `pi_${opaqueId}`,
-        traceId: `tr_${request.id}`,
-      }),
-    );
-    config.idempotencyEntries.set(idempotencyScope, {
-      requestHash: authentication.requestHash,
-      response,
-    });
+    const response = RiskAssessmentSchema.parse(result.responseBody);
 
     reply.header('x-trace-id', response.trace_id);
     reply.header('x-resource-version', response.resource_version);
-    return reply.code(201).send(response);
+    return reply.code(result.outcome === 'CREATED' ? 201 : 200).send(response);
   });
 }

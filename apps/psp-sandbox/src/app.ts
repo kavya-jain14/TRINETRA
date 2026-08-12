@@ -3,25 +3,14 @@ import { randomUUID } from 'node:crypto';
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
+import { ProviderCallbackSchema, ProviderScenarioSchema } from '@trinetra/contracts';
 import { createLoggerOptions } from '@trinetra/observability';
 import { canonicalJson, signPartnerRequest } from '@trinetra/security';
 
 const SimulatorRequestSchema = z.object({
-  payment_id: z.string().min(4),
+  payment_id: z.string().startsWith('pi_').max(96),
   amount_paise: z.number().int().positive(),
-  scenario: z
-    .enum([
-      'SUCCESS_IMMEDIATE',
-      'PENDING_THEN_SUCCESS',
-      'PENDING_THEN_REVERSED',
-      'SOFT_DECLINE',
-      'HARD_DECLINE',
-      'TIMEOUT_UNKNOWN',
-      'DUPLICATE_CALLBACK',
-      'OUT_OF_ORDER_CALLBACK',
-      'INVALID_SIGNATURE_CALLBACK',
-    ])
-    .default('SUCCESS_IMMEDIATE'),
+  scenario: ProviderScenarioSchema.default('SUCCESS_IMMEDIATE'),
 });
 
 const initialStatus = {
@@ -35,6 +24,12 @@ const initialStatus = {
   OUT_OF_ORDER_CALLBACK: 'SUCCEEDED',
   INVALID_SIGNATURE_CALLBACK: 'SUCCEEDED',
 } as const;
+
+interface SyntheticPayment {
+  scenario: string;
+  inquiryCount: number;
+}
+const sandboxState = new Map<string, SyntheticPayment>();
 
 export interface PspSandboxConfig {
   callbackSecret: string;
@@ -59,15 +54,18 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
       });
     }
 
+    const providerReference = `psp_${parsed.data.payment_id.slice(3)}`;
+    sandboxState.set(providerReference, { scenario: parsed.data.scenario, inquiryCount: 0 });
+
     const eventId = `pe_${randomUUID().replaceAll('-', '')}`;
-    const providerEvent = {
+    const providerEvent = ProviderCallbackSchema.parse({
       event_id: eventId,
       payment_id: parsed.data.payment_id,
-      provider_ref: `psp_${parsed.data.payment_id}`,
+      provider_ref: providerReference,
       status: initialStatus[parsed.data.scenario],
       amount_paise: parsed.data.amount_paise,
       occurred_at: now().toISOString(),
-    };
+    });
     const body = canonicalJson(providerEvent);
     const timestamp = String(Math.floor(now().getTime() / 1000));
     const callbackPath = '/v1/provider-events/trinetra-sandbox';
@@ -90,6 +88,39 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
           'x-nonce': eventId,
           'x-signature': signature,
         },
+      },
+    });
+  });
+
+  app.post('/v1/inquire', async (request, reply) => {
+    const { providerRequestReference, requestReference } = request.body as {
+      providerRequestReference: string;
+      requestReference: string;
+    };
+    const payment = sandboxState.get(providerRequestReference);
+    if (!payment) {
+      return reply.code(200).send({
+        providerStatus: 'PENDING',
+        responseCode: 'UNKNOWN_REFERENCE',
+        providerReference: providerRequestReference,
+        evidence: { inquiry_request_ref: requestReference },
+      });
+    }
+
+    payment.inquiryCount += 1;
+    let providerStatus: string = initialStatus[payment.scenario as keyof typeof initialStatus];
+    if (payment.scenario === 'PENDING_THEN_SUCCESS') providerStatus = 'SUCCEEDED';
+    if (payment.scenario === 'PENDING_THEN_REVERSED') {
+      providerStatus = payment.inquiryCount === 1 ? 'REVERSAL_PENDING' : 'REVERSED';
+    }
+
+    return reply.code(200).send({
+      providerStatus,
+      responseCode: 'SYNTHETIC_STATUS',
+      providerReference: providerRequestReference,
+      evidence: {
+        inquiry_request_ref: requestReference,
+        inquiry_number: payment.inquiryCount,
       },
     });
   });

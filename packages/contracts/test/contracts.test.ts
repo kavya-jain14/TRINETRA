@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { PaymentIntentRequestSchema, RiskAssessmentSchema } from '../src/index.js';
+import {
+  PaymentIntentRequestSchema,
+  PaymentSubmissionRequestSchema,
+  ProviderCallbackSchema,
+  RiskAssessmentSchema,
+} from '../src/index.js';
 
 describe('payment intent contracts', () => {
   it('rejects fractional paise', () => {
@@ -37,6 +42,22 @@ describe('payment intent contracts', () => {
       resource_version: 1,
     });
 
+    expect(parsed.success).toBe(false);
+  });
+
+  it('defaults synthetic submission to the immediate success scenario', () => {
+    expect(PaymentSubmissionRequestSchema.parse({})).toEqual({ scenario: 'SUCCESS_IMMEDIATE' });
+  });
+
+  it('rejects provider callback states outside the published recovery contract', () => {
+    const parsed = ProviderCallbackSchema.safeParse({
+      event_id: 'pe_demo_001',
+      payment_id: 'pi_demo_001',
+      provider_ref: 'psp_demo_001',
+      status: 'CREATED',
+      amount_paise: 24_900,
+      occurred_at: '2026-08-10T12:00:00.000Z',
+    });
     expect(parsed.success).toBe(false);
   });
 });
