@@ -185,6 +185,9 @@ importers:
       '@trinetra/config':
         specifier: workspace:*
         version: link:../../packages/config
+      '@trinetra/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
       '@trinetra/database':
         specifier: workspace:*
         version: link:../../packages/database

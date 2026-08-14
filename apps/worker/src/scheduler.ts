@@ -11,7 +11,13 @@ interface DurableQueue<T> {
   add(
     name: string,
     data: T,
-    options: { jobId: string; removeOnComplete: number; removeOnFail: number },
+    options: {
+      jobId: string;
+      attempts?: number;
+      backoff?: { type: 'exponential'; delay: number };
+      removeOnComplete: number;
+      removeOnFail: number;
+    },
   ): Promise<unknown>;
 }
 
@@ -57,6 +63,8 @@ export async function enqueueDueWork(
       };
       await dependencies.webhookQueue.add('signed-delivery', data, {
         jobId: webhookJobId(data),
+        attempts: 8,
+        backoff: { type: 'exponential', delay: 1_000 },
         removeOnComplete: 1_000,
         removeOnFail: 5_000,
       });

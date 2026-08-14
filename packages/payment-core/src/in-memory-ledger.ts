@@ -99,7 +99,7 @@ function recoveryForTransition(
     return {
       tenantId,
       paymentId,
-      statusCheckDueAt: null,
+      statusCheckDueAt: new Date(now.getTime() + 10_000),
       pendingExpiresAt: existing?.pendingExpiresAt ?? null,
       reversalDueAt: new Date(now.getTime() + 30_000),
       complaintEligibleAt: new Date(now.getTime() + 120_000),
@@ -267,8 +267,14 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
 
     if (input.operation === 'SUBMIT') {
       assertPaymentTransition(payment.state, 'SUBMITTED');
-    } else if (payment.state !== 'PENDING' && payment.state !== 'SUBMITTED') {
-      throw new Error(`Status inquiry requires SUBMITTED or PENDING, received ${payment.state}.`);
+    } else if (
+      payment.state !== 'PENDING' &&
+      payment.state !== 'SUBMITTED' &&
+      payment.state !== 'REVERSAL_PENDING'
+    ) {
+      throw new Error(
+        `Status inquiry requires SUBMITTED, PENDING, or REVERSAL_PENDING, received ${payment.state}.`,
+      );
     }
 
     this.#assertOutboxAvailable();
@@ -336,21 +342,26 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
     attempt.responseCode = input.responseCode;
     attempt.completedAt = new Date(input.now);
 
+    if (
+      attempt.operation === 'STATUS_INQUIRY' &&
+      (payment.state === 'PENDING' || payment.state === 'REVERSAL_PENDING') &&
+      (input.providerStatus === 'PENDING' || input.providerStatus === 'REVERSAL_PENDING')
+    ) {
+      const key = paymentKey(input.tenantId, payment.id);
+      const clock = this.#recoveryClocks.get(key);
+      if (clock) {
+        this.#recoveryClocks.set(key, {
+          ...clock,
+          statusCheckDueAt: new Date(input.now.getTime() + 10_000),
+          updatedAt: new Date(input.now),
+        });
+      }
+    }
+
     if (!canApply) {
       return { outcome: 'IGNORED_STALE', payment: clonePayment(payment) };
     }
     if (payment.state === input.providerStatus) {
-      if (attempt.operation === 'STATUS_INQUIRY' && input.providerStatus === 'PENDING') {
-        const key = paymentKey(input.tenantId, payment.id);
-        const clock = this.#recoveryClocks.get(key);
-        if (clock) {
-          this.#recoveryClocks.set(key, {
-            ...clock,
-            statusCheckDueAt: new Date(input.now.getTime() + 10_000),
-            updatedAt: new Date(input.now),
-          });
-        }
-      }
       return { outcome: 'APPLIED', payment: clonePayment(payment) };
     }
 
@@ -472,6 +483,13 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
         dueAt = clock.pendingExpiresAt;
       } else if (
         (payment.state === 'SUBMITTED' || payment.state === 'PENDING') &&
+        clock.statusCheckDueAt &&
+        clock.statusCheckDueAt <= now
+      ) {
+        operation = 'STATUS_CHECK';
+        dueAt = clock.statusCheckDueAt;
+      } else if (
+        payment.state === 'REVERSAL_PENDING' &&
         clock.statusCheckDueAt &&
         clock.statusCheckDueAt <= now
       ) {

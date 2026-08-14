@@ -452,9 +452,23 @@ describe('Postgres payment ledger repository', () => {
       'pi_pg_payment_001',
       'response-crash',
     );
+    const [dueStatusCheck] = await repository.listDueRecoveryJobs(
+      new Date(fixedNow.getTime() + 10_000),
+      10,
+    );
+    const reversed = await restartedService.inquirePendingPayment(
+      tenantA,
+      'pi_pg_payment_001',
+      dueStatusCheck!.recoveryKey,
+    );
 
     expect(firstResponse.providerStatus).toBe('REVERSAL_PENDING');
     expect(recovered.payment.state).toBe('REVERSAL_PENDING');
+    expect(dueStatusCheck).toMatchObject({
+      paymentId: 'pi_pg_payment_001',
+      operation: 'STATUS_CHECK',
+    });
+    expect(reversed.payment.state).toBe('REVERSED');
     expect(
       (
         await pool.query(
@@ -463,6 +477,6 @@ describe('Postgres payment ledger repository', () => {
           [tenantA, 'psp_pg_payment_001'],
         )
       ).rows[0]?.inquiry_count,
-    ).toBe(1);
+    ).toBe(2);
   });
 });

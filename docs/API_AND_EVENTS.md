@@ -67,3 +67,9 @@ Domain event names are published in `DomainEventTypeSchema`. A durable mutation,
 event, and outbox record commit in the same PostgreSQL transaction. Event consumers are
 at-least-once and therefore idempotent. Provider calls occur only after the submission transaction
 commits; unknown outcomes become `PENDING` and schedule status-first recovery.
+
+Partner outbox delivery uses the strict `PartnerWebhookEnvelope` contract. The worker sends
+canonical JSON with `Idempotency-Key`, `X-TRINETRA-Delivery-Key`, and an HMAC-SHA256
+`X-TRINETRA-Signature`. Receivers deduplicate the stable delivery key and return `2xx` only after
+accepting or recognizing the event. Development uses the synthetic `POST /v1/partner-events`
+receiver; production configuration requires an HTTPS endpoint.

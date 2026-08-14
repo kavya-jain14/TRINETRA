@@ -73,12 +73,65 @@ describe('recovery processors', () => {
     expect(clock?.reversalDueAt?.toISOString()).toBe('2026-08-10T12:00:30.000Z');
   });
 
+  it('continues status-first recovery from reversal pending to reversed', async () => {
+    const harness = await pendingHarness('PENDING_THEN_REVERSED');
+    const dependencies = { ...harness, now: () => now };
+
+    const first = await processRecoveryJob(
+      {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'STATUS_CHECK',
+        recoveryKey: 'reversal-status-001',
+      },
+      dependencies,
+    );
+    const [dueStatusCheck] = await harness.repository.listDueRecoveryJobs(
+      new Date(now.getTime() + 10_000),
+      10,
+    );
+    expect(dueStatusCheck).toMatchObject({
+      paymentId: 'pi_worker_001',
+      operation: 'STATUS_CHECK',
+    });
+    const second = await processRecoveryJob(
+      {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'STATUS_CHECK',
+        recoveryKey: dueStatusCheck!.recoveryKey,
+      },
+      dependencies,
+    );
+
+    expect(first).toEqual({ outcome: 'STATUS_CHECKED', state: 'REVERSAL_PENDING' });
+    expect(second).toEqual({ outcome: 'STATUS_CHECKED', state: 'REVERSED' });
+    expect(harness.provider.submissionCount).toBe(1);
+    expect(harness.provider.inquiryCount).toBe(2);
+  });
+
   it('re-enqueues durable recovery clocks and unpublished outbox events idempotently', async () => {
     const harness = await pendingHarness('PENDING_THEN_SUCCESS');
     const recoveryAdds: Array<{ data: unknown; options: { jobId: string } }> = [];
-    const webhookAdds: Array<{ data: unknown; options: { jobId: string } }> = [];
-    const queue = (adds: Array<{ data: unknown; options: { jobId: string } }>) => ({
-      async add(_name: string, data: unknown, options: { jobId: string }) {
+    const webhookAdds: Array<{
+      data: unknown;
+      options: { jobId: string; attempts?: number; backoff?: { type: string; delay: number } };
+    }> = [];
+    const queue = (
+      adds: Array<{
+        data: unknown;
+        options: { jobId: string; attempts?: number; backoff?: { type: string; delay: number } };
+      }>,
+    ) => ({
+      async add(
+        _name: string,
+        data: unknown,
+        options: {
+          jobId: string;
+          attempts?: number;
+          backoff?: { type: 'exponential'; delay: number };
+        },
+      ) {
         adds.push({ data, options });
       },
     });
@@ -95,6 +148,10 @@ describe('recovery processors', () => {
     expect(recoveryAdds[0]?.data).toMatchObject({ operation: 'PENDING_TIMEOUT' });
     expect(result.webhookJobs).toBeGreaterThan(0);
     expect(new Set(webhookAdds.map((entry) => entry.options.jobId)).size).toBe(webhookAdds.length);
+    expect(webhookAdds[0]?.options).toMatchObject({
+      attempts: 8,
+      backoff: { type: 'exponential', delay: 1_000 },
+    });
   });
 
   it('signs and durably marks an outbox delivery exactly once', async () => {
@@ -106,9 +163,15 @@ describe('recovery processors', () => {
       outboxEventId: event!.id,
       deliveryKey: `outbox-${event!.id}`,
     };
+    const deliveredBodies: string[] = [];
     const dependencies = {
       repository: harness.repository,
       signingSecret: 'worker-test-secret-at-least-32-characters',
+      deliveryClient: {
+        async deliver(input: { body: string }) {
+          deliveredBodies.push(input.body);
+        },
+      },
       now: () => now,
     };
     const delivered = await processWebhookJob(data, dependencies);
@@ -117,8 +180,36 @@ describe('recovery processors', () => {
     expect(delivered.outcome).toBe('DELIVERED');
     expect(delivered.signature).toMatch(/^[a-f0-9]{64}$/);
     expect(duplicate.outcome).toBe('DUPLICATE');
+    expect(deliveredBodies).toHaveLength(1);
     expect(
       (await harness.repository.getOutboxEvent(tenantId, event!.id))?.publishedAt?.toISOString(),
     ).toBe(now.toISOString());
+  });
+
+  it('leaves an outbox event unpublished when delivery fails', async () => {
+    const harness = await pendingHarness('PENDING_THEN_SUCCESS');
+    const [event] = await harness.repository.listPendingOutboxEvents(now, 1);
+    expect(event).toBeDefined();
+
+    await expect(
+      processWebhookJob(
+        {
+          tenantId,
+          outboxEventId: event!.id,
+          deliveryKey: `outbox-${event!.id}`,
+        },
+        {
+          repository: harness.repository,
+          signingSecret: 'worker-test-secret-at-least-32-characters',
+          deliveryClient: {
+            async deliver() {
+              throw new Error('Synthetic partner endpoint outage');
+            },
+          },
+          now: () => now,
+        },
+      ),
+    ).rejects.toThrow('Synthetic partner endpoint outage');
+    expect((await harness.repository.getOutboxEvent(tenantId, event!.id))?.publishedAt).toBeNull();
   });
 });

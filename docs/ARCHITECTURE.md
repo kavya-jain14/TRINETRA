@@ -17,6 +17,11 @@ partner boundary
 
 PostgreSQL is durable transactional truth. Redis stores only short-lived nonces, velocity windows, bounded features, rate-limit counters, and BullMQ state. No Redis value is the sole record of a payment outcome.
 
+Outbox rows remain unpublished until the worker receives a successful response from the configured
+partner webhook. Delivery is at-least-once across the unavoidable post-send/pre-commit crash window;
+the stable delivery key makes receiver-side deduplication mandatory. `REVERSAL_PENDING` payments
+keep status polling on the original provider reference until a terminal reversal is recorded.
+
 ## Three risk lenses
 
 - NETRA-I Identity: device/session/customer consistency.

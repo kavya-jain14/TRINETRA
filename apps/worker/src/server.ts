@@ -1,4 +1,4 @@
-import { Queue, Worker } from 'bullmq';
+import { Queue, UnrecoverableError, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 
 import { workerEnvSchema } from '@trinetra/config';
@@ -19,6 +19,7 @@ import {
 } from './queues.js';
 import { processReconciliationJob, processRecoveryJob, processWebhookJob } from './processors.js';
 import { enqueueDueWork } from './scheduler.js';
+import { HttpWebhookDeliveryClient, WebhookDeliveryError } from './webhook-delivery.js';
 
 const env = workerEnvSchema.parse(process.env);
 const logger = createLogger(env.LOG_LEVEL);
@@ -35,6 +36,10 @@ const ledgerService = new PaymentLedgerService({
   provider: new PostgresDeterministicPaymentProviderAdapter(pool),
 });
 const dependencies = { repository, ledgerService };
+const webhookDeliveryClient = new HttpWebhookDeliveryClient(
+  env.PARTNER_WEBHOOK_URL,
+  env.WEBHOOK_DELIVERY_TIMEOUT_MS,
+);
 const recoveryQueue = new Queue<RecoveryJobData>(queueNames.recovery, { connection });
 const webhookQueue = new Queue<WebhookJobData>(queueNames.webhooks, { connection });
 
@@ -50,11 +55,20 @@ const reconciliationWorker = new Worker<ReconciliationJobData>(
 );
 const webhookWorker = new Worker<WebhookJobData>(
   queueNames.webhooks,
-  async (job) =>
-    await processWebhookJob(job.data, {
-      repository,
-      signingSecret: env.DEMO_PARTNER_SECRET,
-    }),
+  async (job) => {
+    try {
+      return await processWebhookJob(job.data, {
+        repository,
+        signingSecret: env.DEMO_PARTNER_SECRET,
+        deliveryClient: webhookDeliveryClient,
+      });
+    } catch (error) {
+      if (error instanceof WebhookDeliveryError && !error.retryable) {
+        throw new UnrecoverableError(error.message);
+      }
+      throw error;
+    }
+  },
   { connection, concurrency: 4 },
 );
 const workers = [recoveryWorker, reconciliationWorker, webhookWorker];
