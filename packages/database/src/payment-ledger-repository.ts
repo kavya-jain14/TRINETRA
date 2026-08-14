@@ -316,8 +316,14 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
 
       if (input.operation === 'SUBMIT') {
         assertPaymentTransition(payment.state, 'SUBMITTED');
-      } else if (payment.state !== 'PENDING' && payment.state !== 'SUBMITTED') {
-        throw new Error(`Status inquiry requires SUBMITTED or PENDING, received ${payment.state}.`);
+      } else if (
+        payment.state !== 'PENDING' &&
+        payment.state !== 'SUBMITTED' &&
+        payment.state !== 'REVERSAL_PENDING'
+      ) {
+        throw new Error(
+          `Status inquiry requires SUBMITTED, PENDING, or REVERSAL_PENDING, received ${payment.state}.`,
+        );
       }
 
       const attemptResult = await client.query<ProviderAttemptRow>(
@@ -412,21 +418,21 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
         ],
       );
 
+      if (
+        attempt.operation === 'STATUS_INQUIRY' &&
+        (payment.state === 'PENDING' || payment.state === 'REVERSAL_PENDING') &&
+        (input.providerStatus === 'PENDING' || input.providerStatus === 'REVERSAL_PENDING')
+      ) {
+        await client.query(
+          `UPDATE payment_recovery_clocks
+              SET status_check_due_at = $3,
+                  updated_at = $4
+            WHERE tenant_id = $1 AND payment_intent_id = $2`,
+          [input.tenantId, payment.internal_id, new Date(input.now.getTime() + 10_000), input.now],
+        );
+      }
+
       if (payment.state === input.providerStatus) {
-        if (attempt.operation === 'STATUS_INQUIRY' && input.providerStatus === 'PENDING') {
-          await client.query(
-            `UPDATE payment_recovery_clocks
-                SET status_check_due_at = $3,
-                    updated_at = $4
-              WHERE tenant_id = $1 AND payment_intent_id = $2`,
-            [
-              input.tenantId,
-              payment.internal_id,
-              new Date(input.now.getTime() + 10_000),
-              input.now,
-            ],
-          );
-        }
         return { outcome: 'APPLIED', payment: toPayment(payment) };
       }
       if (!canTransitionPayment(payment.state, input.providerStatus)) {
@@ -636,14 +642,16 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
          FROM payment_recovery_clocks prc
          JOIN payment_intents pi
            ON pi.tenant_id = prc.tenant_id AND pi.id = prc.payment_intent_id
-        WHERE (pi.state IN ('SUBMITTED', 'PENDING') AND prc.status_check_due_at <= $1)
+        WHERE (pi.state IN ('SUBMITTED', 'PENDING', 'REVERSAL_PENDING')
+               AND prc.status_check_due_at <= $1)
            OR (pi.state = 'PENDING' AND prc.pending_expires_at <= $1)
            OR (pi.state = 'REVERSAL_PENDING'
                AND (prc.reversal_due_at <= $1 OR prc.complaint_eligible_at <= $1))
         ORDER BY CASE
           WHEN pi.state = 'PENDING' AND prc.pending_expires_at <= $1
             THEN prc.pending_expires_at
-          WHEN pi.state IN ('SUBMITTED', 'PENDING') THEN prc.status_check_due_at
+          WHEN pi.state IN ('SUBMITTED', 'PENDING', 'REVERSAL_PENDING')
+               AND prc.status_check_due_at <= $1 THEN prc.status_check_due_at
           WHEN prc.complaint_eligible_at <= $1 THEN prc.complaint_eligible_at
           ELSE prc.reversal_due_at
         END
@@ -660,7 +668,13 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
       ) {
         operation = 'PENDING_TIMEOUT';
         dueAt = asDate(row.pending_expires_at);
-      } else if (row.state === 'SUBMITTED' || row.state === 'PENDING') {
+      } else if (
+        row.state === 'SUBMITTED' ||
+        row.state === 'PENDING' ||
+        (row.state === 'REVERSAL_PENDING' &&
+          row.status_check_due_at !== null &&
+          asDate(row.status_check_due_at) <= now)
+      ) {
         operation = 'STATUS_CHECK';
         dueAt = asDate(row.status_check_due_at!);
       } else {
@@ -1045,10 +1059,11 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
     if (toState === 'REVERSAL_PENDING') {
       await client.query(
         `INSERT INTO payment_recovery_clocks (
-           tenant_id, payment_intent_id, reversal_due_at, complaint_eligible_at, updated_at
-         ) VALUES ($1, $2, $3, $4, $5)
+           tenant_id, payment_intent_id, status_check_due_at, reversal_due_at,
+           complaint_eligible_at, updated_at
+         ) VALUES ($1, $2, $3, $4, $5, $6)
          ON CONFLICT (tenant_id, payment_intent_id) DO UPDATE
-           SET status_check_due_at = NULL,
+           SET status_check_due_at = EXCLUDED.status_check_due_at,
                reversal_due_at = EXCLUDED.reversal_due_at,
                complaint_eligible_at = EXCLUDED.complaint_eligible_at,
                resolved_at = NULL,
@@ -1056,6 +1071,7 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
         [
           payment.tenant_id,
           payment.internal_id,
+          new Date(now.getTime() + 10_000),
           new Date(now.getTime() + 30_000),
           new Date(now.getTime() + 120_000),
           now,

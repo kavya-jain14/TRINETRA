@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 
+import { PartnerWebhookEnvelopeSchema } from '@trinetra/contracts';
 import {
   PaymentNotFoundError,
   type PaymentLedgerRepository,
@@ -8,6 +9,7 @@ import {
 import { canonicalJson } from '@trinetra/security';
 
 import type { ReconciliationJobData, RecoveryJobData, WebhookJobData } from './queues.js';
+import type { WebhookDeliveryClient } from './webhook-delivery.js';
 
 export interface ProcessorDependencies {
   repository: PaymentLedgerRepository;
@@ -24,7 +26,11 @@ export async function processRecoveryJob(
   if (!payment) throw new PaymentNotFoundError(data.paymentId);
 
   if (data.operation === 'STATUS_CHECK') {
-    if (payment.state !== 'PENDING' && payment.state !== 'SUBMITTED') {
+    if (
+      payment.state !== 'PENDING' &&
+      payment.state !== 'SUBMITTED' &&
+      payment.state !== 'REVERSAL_PENDING'
+    ) {
       return { outcome: 'NOOP', state: payment.state } as const;
     }
     const result = await dependencies.ledgerService.inquirePendingPayment(
@@ -82,7 +88,9 @@ export async function processReconciliationJob(
 ) {
   const payment = await dependencies.repository.getPayment(data.tenantId, data.paymentId);
   if (!payment) throw new PaymentNotFoundError(data.paymentId);
-  if (payment.state !== 'PENDING') return { outcome: 'NOOP', state: payment.state } as const;
+  if (payment.state !== 'PENDING' && payment.state !== 'REVERSAL_PENDING') {
+    return { outcome: 'NOOP', state: payment.state } as const;
+  }
   const result = await dependencies.ledgerService.inquirePendingPayment(
     data.tenantId,
     data.paymentId,
@@ -94,6 +102,7 @@ export async function processReconciliationJob(
 export interface WebhookProcessorDependencies {
   repository: PaymentLedgerRepository;
   signingSecret: string;
+  deliveryClient: WebhookDeliveryClient;
   now?: () => Date;
 }
 
@@ -103,17 +112,35 @@ export async function processWebhookJob(
 ) {
   const event = await dependencies.repository.getOutboxEvent(data.tenantId, data.outboxEventId);
   if (!event) throw new Error(`Outbox event ${data.outboxEventId} was not found.`);
-  const envelope = canonicalJson({
-    delivery_key: data.deliveryKey,
-    event_id: event.id,
-    event_type: event.eventType,
-    aggregate_id: event.aggregateId,
-    payload: event.payload,
-    created_at: event.createdAt.toISOString(),
-  });
+  const envelope = canonicalJson(
+    PartnerWebhookEnvelopeSchema.parse({
+      delivery_key: data.deliveryKey,
+      event_id: event.id,
+      event_type: event.eventType,
+      aggregate_id: event.aggregateId,
+      payload: event.payload,
+      created_at: event.createdAt.toISOString(),
+    }),
+  );
   const signature = createHmac('sha256', dependencies.signingSecret)
     .update(envelope, 'utf8')
     .digest('hex');
+
+  if (event.publishedAt) {
+    return {
+      outcome: 'DUPLICATE',
+      tenantId: data.tenantId,
+      outboxEventId: data.outboxEventId,
+      deliveryKey: data.deliveryKey,
+      signature,
+    } as const;
+  }
+
+  await dependencies.deliveryClient.deliver({
+    deliveryKey: data.deliveryKey,
+    body: envelope,
+    signature,
+  });
   const published = await dependencies.repository.markOutboxPublished(
     data.tenantId,
     data.outboxEventId,

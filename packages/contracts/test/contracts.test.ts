@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  PartnerWebhookEnvelopeSchema,
   PaymentIntentRequestSchema,
   PaymentSubmissionRequestSchema,
   ProviderCallbackSchema,
@@ -59,5 +60,21 @@ describe('payment intent contracts', () => {
       occurred_at: '2026-08-10T12:00:00.000Z',
     });
     expect(parsed.success).toBe(false);
+  });
+
+  it('publishes a strict partner webhook envelope contract', () => {
+    const envelope = PartnerWebhookEnvelopeSchema.parse({
+      delivery_key: 'outbox-event-001',
+      event_id: 'event-001',
+      event_type: 'payment.state_changed',
+      aggregate_id: 'pi_demo_001',
+      payload: { payment_id: 'pi_demo_001', state: 'SUCCEEDED' },
+      created_at: '2026-08-10T12:00:00.000Z',
+    });
+
+    expect(envelope.delivery_key).toBe('outbox-event-001');
+    expect(PartnerWebhookEnvelopeSchema.safeParse({ ...envelope, unexpected: true }).success).toBe(
+      false,
+    );
   });
 });

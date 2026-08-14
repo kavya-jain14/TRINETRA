@@ -49,13 +49,19 @@ the synthetic PSP durably replays its first response instead of advancing twice.
 
 - `STATUS_CHECK`: inquire using the original provider reference.
 - `PENDING_TIMEOUT`: move unresolved `PENDING` to `REVERSAL_PENDING` and start bounded clocks.
+- `REVERSAL_PENDING`: keep status-first inquiry active until the provider reports `REVERSED`.
 - `REVERSAL_CLOCK`: return wait, reversal escalation, or complaint-eligible outcome.
 - reconciliation jobs reuse status inquiry and therefore preserve submit-once behavior.
 - webhook jobs carry stable outbox/delivery keys for signed downstream delivery.
 
 The worker scheduler scans durable recovery clocks and unpublished outbox rows. BullMQ job IDs are
-deterministic, pending inquiries advance their next due time, reversal/complaint signals are written
-back to the outbox, and successful signed deliveries mark `published_at` exactly once.
+deterministic, non-terminal inquiries advance their next due time, and reversal/complaint signals
+are written back to the outbox. Each outbox row is POSTed as a strict signed envelope with a stable
+idempotency/delivery key. Only a successful HTTP response may set `published_at`; network errors,
+timeouts, `429`, and `5xx` responses remain unpublished and retry with exponential backoff.
+Permanent `4xx` contract failures stop automatic retry and remain visible for operator repair. The
+synthetic sandbox exposes `POST /v1/partner-events` as a signature-verifying, deduplicating local
+receiver.
 
 ## API and callback security
 

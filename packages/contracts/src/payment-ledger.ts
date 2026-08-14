@@ -46,6 +46,18 @@ export const ProviderCallbackSchema = z
   .strict();
 export type ProviderCallback = z.infer<typeof ProviderCallbackSchema>;
 
+export const PartnerWebhookEnvelopeSchema = z
+  .object({
+    delivery_key: z.string().startsWith('outbox-').max(256),
+    event_id: z.string().min(1).max(256),
+    event_type: z.string().min(1).max(160),
+    aggregate_id: z.string().startsWith('pi_').max(96),
+    payload: z.record(z.string(), z.unknown()),
+    created_at: z.string().datetime({ offset: true }),
+  })
+  .strict();
+export type PartnerWebhookEnvelope = z.infer<typeof PartnerWebhookEnvelopeSchema>;
+
 export const PaymentResourceSchema = z.object({
   payment_intent_id: z.string().startsWith('pi_'),
   state: PaymentStateSchema,

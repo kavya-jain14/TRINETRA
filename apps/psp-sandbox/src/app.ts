@@ -1,9 +1,13 @@
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 
 import Fastify, { type FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
-import { ProviderCallbackSchema, ProviderScenarioSchema } from '@trinetra/contracts';
+import {
+  PartnerWebhookEnvelopeSchema,
+  ProviderCallbackSchema,
+  ProviderScenarioSchema,
+} from '@trinetra/contracts';
 import { createLoggerOptions } from '@trinetra/observability';
 import { canonicalJson, signPartnerRequest } from '@trinetra/security';
 
@@ -31,6 +35,16 @@ interface SyntheticPayment {
 }
 const sandboxState = new Map<string, SyntheticPayment>();
 
+function validWebhookSignature(secret: string, body: string, candidate: string): boolean {
+  if (!/^[a-f0-9]{64}$/i.test(candidate)) return false;
+  const expected = Buffer.from(
+    createHmac('sha256', secret).update(body, 'utf8').digest('hex'),
+    'hex',
+  );
+  const received = Buffer.from(candidate, 'hex');
+  return expected.length === received.length && timingSafeEqual(expected, received);
+}
+
 export interface PspSandboxConfig {
   callbackSecret: string;
   now?: () => Date;
@@ -43,6 +57,7 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
     logger: config.logger ? createLoggerOptions(config.logLevel) : false,
   });
   const now = config.now ?? (() => new Date());
+  const receivedDeliveryKeys = new Set<string>();
 
   app.get('/health/live', async () => ({ status: 'ok', service: 'trinetra-psp-sandbox' }));
 
@@ -123,6 +138,39 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
         inquiry_number: payment.inquiryCount,
       },
     });
+  });
+
+  app.post('/v1/partner-events', async (request, reply) => {
+    const parsed = PartnerWebhookEnvelopeSchema.safeParse(request.body);
+    const deliveryKey = request.headers['x-trinetra-delivery-key'];
+    const idempotencyKey = request.headers['idempotency-key'];
+    const signature = request.headers['x-trinetra-signature'];
+    if (
+      !parsed.success ||
+      typeof deliveryKey !== 'string' ||
+      typeof idempotencyKey !== 'string' ||
+      typeof signature !== 'string'
+    ) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_FAILED', message: 'Invalid partner event delivery.' },
+      });
+    }
+    if (deliveryKey !== parsed.data.delivery_key || idempotencyKey !== deliveryKey) {
+      return reply.code(409).send({
+        error: { code: 'DELIVERY_KEY_MISMATCH', message: 'Delivery key does not match body.' },
+      });
+    }
+    if (!validWebhookSignature(config.callbackSecret, canonicalJson(parsed.data), signature)) {
+      return reply.code(401).send({
+        error: { code: 'INVALID_SIGNATURE', message: 'Partner event authentication failed.' },
+      });
+    }
+    if (receivedDeliveryKeys.has(deliveryKey)) {
+      return reply.code(200).send({ delivery_key: deliveryKey, outcome: 'DUPLICATE' });
+    }
+
+    receivedDeliveryKeys.add(deliveryKey);
+    return reply.code(202).send({ delivery_key: deliveryKey, outcome: 'ACCEPTED' });
   });
 
   return app;
