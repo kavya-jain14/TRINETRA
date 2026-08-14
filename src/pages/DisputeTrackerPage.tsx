@@ -101,6 +101,7 @@ export const DisputeTrackerPage: React.FC<DisputeTrackerProps> = ({
       {!odrRef ? (
         <form onSubmit={handleFileOdrDispute} className="space-y-2 border-t border-neutral-800 pt-3">
           <label className="block text-xs text-gray-400">Grievance Comments:</label>
+          <br></br>
           <textarea
             required
             rows={2}
@@ -109,6 +110,7 @@ export const DisputeTrackerPage: React.FC<DisputeTrackerProps> = ({
             placeholder="Describe issue (e.g., Merchant confirmation missing after debit)..."
             className="w-full bg-neutral-950 border border-neutral-700 rounded p-2 text-xs text-white focus:outline-none focus:border-amber-500"
           />
+          <br></br>
           <button
             type="submit"
             className="w-full bg-amber-600 hover:bg-amber-700 text-white font-bold py-2 rounded-md transition text-sm"
