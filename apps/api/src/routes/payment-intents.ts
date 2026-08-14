@@ -12,17 +12,14 @@ import {
   type CreatePaymentResult,
   type PaymentLedgerService,
 } from '@trinetra/payment-core';
-import { evaluatePaymentIntent } from '@trinetra/risk-core';
+import { evaluatePaymentIntent, normalizePaymentPartyName } from '@trinetra/risk-core';
 
 import { authenticatePartnerRequest, type PartnerAuthConfig } from '../auth.js';
 
 export interface PaymentIntentRouteConfig extends PartnerAuthConfig {
   ledgerService: PaymentLedgerService;
   tenantId: string;
-}
-
-function normalizedName(value: string): string {
-  return value.trim().toLocaleLowerCase('en-IN').replace(/\s+/g, ' ');
+  isTrustedDeviceToken: (deviceToken: string) => boolean;
 }
 
 function privacyMinimizedRequest(input: PaymentIntentRequest) {
@@ -39,8 +36,8 @@ function privacyMinimizedRequest(input: PaymentIntentRequest) {
       ? {
           merchant_ref: input.merchant.merchant_ref,
           payee_name_matches_merchant:
-            normalizedName(input.merchant.expected_name) ===
-            normalizedName(input.beneficiary.resolved_name),
+            normalizePaymentPartyName(input.merchant.expected_name) ===
+            normalizePaymentPartyName(input.beneficiary.resolved_name),
           mcc: input.merchant.mcc,
         }
       : undefined,
@@ -75,6 +72,9 @@ export async function registerPaymentIntentRoutes(
         now: config.now(),
         paymentIntentId,
         traceId: `tr_${request.id}`,
+        deviceTrust: config.isTrustedDeviceToken(parsed.data.context.device_token)
+          ? 'TRUSTED'
+          : 'UNKNOWN',
       }),
     );
 

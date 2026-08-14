@@ -9,6 +9,7 @@ export interface EvaluationContext {
   now: Date;
   paymentIntentId: string;
   traceId: string;
+  deviceTrust: 'TRUSTED' | 'UNKNOWN';
 }
 
 type EvaluationResult = Omit<RiskAssessment, 'resource_version'> & { resource_version: 1 };
@@ -39,12 +40,16 @@ function requiredAction(decision: RiskDecision): RiskAssessment['required_action
   return actions[decision];
 }
 
+export function normalizePaymentPartyName(value: string): string {
+  return value.normalize('NFKC').trim().toLocaleLowerCase('en-IN').replace(/\s+/gu, ' ');
+}
+
 export function evaluatePaymentIntent(
   input: PaymentIntentRequest,
   context: EvaluationContext,
 ): EvaluationResult {
   const reasons: RiskReason[] = [];
-  let identity = input.context.device_token.includes('trusted') ? 8 : 48;
+  let identity = context.deviceTrust === 'TRUSTED' ? 8 : 48;
   let intent = 6;
   let integrity = 4;
 
@@ -72,8 +77,8 @@ export function evaluatePaymentIntent(
 
   if (
     input.merchant !== undefined &&
-    input.merchant.expected_name.toLocaleLowerCase('en-IN') !==
-      input.beneficiary.resolved_name.toLocaleLowerCase('en-IN')
+    normalizePaymentPartyName(input.merchant.expected_name) !==
+      normalizePaymentPartyName(input.beneficiary.resolved_name)
   ) {
     integrity = Math.max(integrity, 86);
     reasons.push({

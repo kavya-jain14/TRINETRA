@@ -79,6 +79,28 @@ describe('TRINETRA partner API foundation', () => {
     await app.close();
   });
 
+  it('fails readiness when a required dependency is unavailable', async () => {
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      readinessChecks: {
+        postgresql: async () => {
+          throw new Error('synthetic database outage');
+        },
+      },
+    });
+
+    const response = await app.inject({ method: 'GET', url: '/health/ready' });
+    expect(response.statusCode).toBe(503);
+    expect(response.json()).toMatchObject({
+      status: 'not_ready',
+      service: 'trinetra-api',
+      dependencies: { postgresql: 'unavailable' },
+    });
+    await app.close();
+  });
+
   it('rejects unsigned payment intent writes', async () => {
     const app = await buildApp({
       partnerKey: 'partner_demo',
@@ -115,6 +137,33 @@ describe('TRINETRA partner API foundation', () => {
       risk_score: 8,
       subscores: { identity: 8, intent: 6, integrity: 4 },
       rule_set_version: 'ruleset_foundation_1',
+    });
+    await app.close();
+  });
+
+  it('does not grant device trust from a misleading token substring', async () => {
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+    });
+    const misleadingIntent = {
+      ...trustedIntent,
+      context: { ...trustedIntent.context, device_token: 'dev_tok_untrusted' },
+    } as const;
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/payment-intents',
+      headers: signedHeaders(misleadingIntent, 'nonce_untrusted_001', 'idem_untrusted_001'),
+      payload: misleadingIntent,
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json()).toMatchObject({
+      decision: 'WARN',
+      subscores: { identity: 48 },
+      reasons: [expect.objectContaining({ code: 'UNKNOWN_DEVICE' })],
     });
     await app.close();
   });

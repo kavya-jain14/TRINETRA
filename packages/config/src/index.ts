@@ -9,9 +9,11 @@ export const apiEnvSchema = commonEnvSchema.extend({
   API_HOST: z.string().default('0.0.0.0'),
   API_PORT: z.coerce.number().int().min(1).max(65_535).default(4000),
   DATABASE_URL: z.string().url(),
+  REDIS_URL: z.string().url(),
   DEMO_PARTNER_KEY: z.string().min(3).default('partner_demo'),
   DEMO_PARTNER_SECRET: z.string().min(32),
   DEMO_TENANT_ID: z.uuid().default('00000000-0000-4000-8000-000000000001'),
+  DEMO_TRUSTED_DEVICE_TOKEN: z.string().min(8).default('dev_tok_trusted'),
 });
 export type ApiEnv = z.infer<typeof apiEnvSchema>;
 

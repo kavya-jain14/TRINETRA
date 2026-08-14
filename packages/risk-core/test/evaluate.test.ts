@@ -25,6 +25,7 @@ const context = {
   now: new Date('2026-08-10T12:00:00.000Z'),
   paymentIntentId: 'pi_foundation_demo',
   traceId: 'tr_foundation_demo',
+  deviceTrust: 'TRUSTED' as const,
 };
 
 describe('three-eye deterministic evaluation', () => {
@@ -49,5 +50,37 @@ describe('three-eye deterministic evaluation', () => {
 
     expect(result.decision).toBe('BLOCK');
     expect(result.reasons[0]?.code).toBe('REFUND_COLLECT_CONFLICT');
+  });
+
+  it('does not infer trust from a token containing the word trusted', () => {
+    const result = evaluatePaymentIntent(
+      {
+        ...trustedIntent,
+        context: { ...trustedIntent.context, device_token: 'dev_tok_untrusted' },
+      },
+      { ...context, deviceTrust: 'UNKNOWN' },
+    );
+
+    expect(result.subscores.identity).toBe(48);
+    expect(result.reasons).toContainEqual(expect.objectContaining({ code: 'UNKNOWN_DEVICE' }));
+  });
+
+  it('normalizes harmless whitespace and casing before comparing payee names', () => {
+    const result = evaluatePaymentIntent(
+      {
+        ...trustedIntent,
+        beneficiary: {
+          ...trustedIntent.beneficiary,
+          resolved_name: '  AARAV   electronics  ',
+        },
+      },
+      context,
+    );
+
+    expect(result.subscores.integrity).toBe(4);
+    expect(result.reasons).not.toContainEqual(
+      expect.objectContaining({ code: 'PAYEE_MERCHANT_MISMATCH' }),
+    );
+    expect(result.decision).toBe('ALLOW');
   });
 });

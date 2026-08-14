@@ -14,7 +14,7 @@ UI shells, CI, and local infrastructure. Package 0B now adds:
 - submit-once deterministic PSP adapter behavior;
 - authenticated, idempotent provider callbacks that cannot regress state;
 - status-first pending recovery, reversal/complaint clocks, and BullMQ processors;
-- repository, domain-property, API integration, and worker recovery tests.
+- repository, domain-property, API integration, and worker recovery tests. CI exercises the signed API against real PostgreSQL 17 and Redis 7.4 services, including cross-replica nonce replay rejection and active readiness checks.
 
 ## Quick start
 
