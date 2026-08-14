@@ -27,6 +27,8 @@ export interface AppConfig {
   paymentProvider?: PaymentProviderAdapter;
   tenantId?: string;
   providerCallbackSecret?: string;
+  trustedDeviceTokens?: readonly string[];
+  readinessChecks?: Readonly<Record<string, () => Promise<void>>>;
   logger?: boolean;
 }
 
@@ -46,9 +48,11 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     now,
   });
   const tenantId = config.tenantId ?? defaultTenantId;
+  const trustedDeviceTokens = new Set(config.trustedDeviceTokens ?? ['dev_tok_trusted']);
 
   await registerHealthRoutes(app, {
     persistence: config.ledgerRepository ? 'postgresql' : 'in-memory-test-adapter',
+    ...(config.readinessChecks ? { checks: config.readinessChecks } : {}),
   });
   app.get('/openapi.json', async () => openApiDocument);
   await registerPaymentIntentRoutes(app, {
@@ -59,6 +63,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     clockSkewSeconds: 300,
     ledgerService,
     tenantId,
+    isTrustedDeviceToken: (deviceToken) => trustedDeviceTokens.has(deviceToken),
   });
   await registerPaymentOperationRoutes(app, {
     partnerKey: config.partnerKey,

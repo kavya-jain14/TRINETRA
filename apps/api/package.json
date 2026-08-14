@@ -8,7 +8,7 @@
     "dev": "node --env-file-if-exists=../../.env --import tsx --watch src/server.ts",
     "start": "node --env-file-if-exists=../../.env dist/server.js",
     "test": "vitest run test/app.test.ts",
-    "test:integration": "vitest run test/app.test.ts",
+    "test:integration": "vitest run test/postgres-redis.integration.test.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -20,6 +20,7 @@
     "@trinetra/risk-core": "workspace:*",
     "@trinetra/security": "workspace:*",
     "fastify": "catalog:",
+    "ioredis": "6.0.0",
     "zod": "catalog:"
   },
   "devDependencies": {
