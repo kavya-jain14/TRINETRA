@@ -917,15 +917,19 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
   ): Promise<PaymentRow> {
     const result = await client.query<PaymentRow>(
       `UPDATE payment_intents
-          SET state = $4,
+          SET state = $4::payment_state,
               resource_version = resource_version + 1,
-              submitted_at = CASE WHEN $4 = 'SUBMITTED' THEN $5 ELSE submitted_at END,
+              submitted_at = CASE
+                WHEN $4::payment_state = 'SUBMITTED' THEN $5
+                ELSE submitted_at
+              END,
               pending_since = CASE
-                WHEN $4 = 'PENDING' THEN COALESCE(pending_since, $5)
+                WHEN $4::payment_state = 'PENDING' THEN COALESCE(pending_since, $5)
                 ELSE pending_since
               END,
               completed_at = CASE
-                WHEN $4 IN ('SUCCEEDED', 'FAILED_SOFT', 'FAILED_HARD', 'REVERSED') THEN $5
+                WHEN $4::payment_state IN
+                  ('SUCCEEDED', 'FAILED_SOFT', 'FAILED_HARD', 'REVERSED') THEN $5
                 ELSE completed_at
               END,
               updated_at = $5
