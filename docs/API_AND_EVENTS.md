@@ -45,6 +45,9 @@ Health endpoints are separate:
 
 - `GET /health/live`
 - `GET /health/ready`
+
+`/health/live` only proves the process can answer. `/health/ready` actively checks required PostgreSQL and Redis connections and returns HTTP `503` with dependency status when either is unavailable.
+
 - `GET /openapi.json`
 
 ## Stable error shape
