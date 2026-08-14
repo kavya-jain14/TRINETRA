@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { DemoPaymentListSchema, DemoPaymentSnapshotSchema, DemoRunRequestSchema } from './demo.js';
 import { ApiErrorSchema } from './errors.js';
 import { PaymentIntentRequestSchema, RiskAssessmentSchema } from './payment-intent.js';
 import {
@@ -106,6 +107,55 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/demo/scenarios/trusted-payment/run': {
+      post: {
+        summary: 'Run the fixed trusted-payment scenario in non-production demo mode',
+        'x-demo-only': true,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/DemoRunRequest' } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Durable payment decision, provider result, and immutable timeline',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/demo/payments': {
+      get: {
+        summary: 'List recent fixed-scenario demo payments for the operations console',
+        'x-demo-only': true,
+        responses: {
+          '200': {
+            description: 'Recent synthetic demo payments',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentList' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/demo/payments/{paymentId}': {
+      get: {
+        summary: 'Read one durable fixed-scenario demo timeline',
+        'x-demo-only': true,
+        parameters: [{ in: 'path', name: 'paymentId', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Synthetic demo payment timeline',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
   },
   components: {
     securitySchemes: {
@@ -129,6 +179,9 @@ export const openApiDocument = {
       PaymentOperationResult: z.toJSONSchema(PaymentOperationResultSchema),
       ProviderCallback: z.toJSONSchema(ProviderCallbackSchema),
       ProviderCallbackAck: z.toJSONSchema(ProviderCallbackAckSchema),
+      DemoRunRequest: z.toJSONSchema(DemoRunRequestSchema),
+      DemoPaymentSnapshot: z.toJSONSchema(DemoPaymentSnapshotSchema),
+      DemoPaymentList: z.toJSONSchema(DemoPaymentListSchema),
       ApiError: z.toJSONSchema(ApiErrorSchema),
     },
   },

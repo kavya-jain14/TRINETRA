@@ -83,6 +83,7 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
       ledgerRepository: repository,
       tenantId,
       trustedDeviceTokens: ['dev_tok_integration_trusted'],
+      demoMode: true,
       readinessChecks: {
         postgresql: async () => {
           await pool.query('select 1');
@@ -139,5 +140,39 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
       amountPaise: 24_900,
       state: 'ALLOWED',
     });
+  });
+
+  it('persists the golden demo timeline and exposes it across API replicas', async () => {
+    const primary = apps[0]!;
+    const replica = apps[1]!;
+    const runId = `run_${randomUUID().replaceAll('-', '')}`;
+
+    const created = await primary.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/trusted-payment/run',
+      payload: { run_id: runId },
+    });
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      assessment: { decision: 'ALLOW' },
+      payment: { state: 'SUCCEEDED' },
+    });
+
+    const listed = await replica.inject({ method: 'GET', url: '/v1/demo/payments?limit=20' });
+    expect(listed.statusCode).toBe(200);
+    const persisted = listed
+      .json()
+      .payments.find(
+        (payment: { payment: { payment_intent_id: string } }) =>
+          payment.payment.payment_intent_id === created.json().payment.payment_intent_id,
+      );
+    if (!persisted) throw new Error('Golden demo payment was not visible on the second replica.');
+    expect(persisted.timeline.map((event: { to_state: string }) => event.to_state)).toEqual([
+      'CREATED',
+      'RISK_EVALUATING',
+      'ALLOWED',
+      'SUBMITTED',
+      'SUCCEEDED',
+    ]);
   });
 });

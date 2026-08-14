@@ -41,6 +41,19 @@ receive a successful `DUPLICATE` acknowledgement.
 - `POST /v1/provider-events/trinetra-sandbox` verifies the provider signature, deduplicates the
   provider event, and applies only a legal monotonic transition.
 
+## Demo-only browser boundary
+
+`DEMO_MODE=true` registers a deliberately narrow synthetic interface:
+
+- `POST /v1/demo/scenarios/trusted-payment/run` runs only the fixed ₹249 trusted-merchant fixture.
+- `GET /v1/demo/payments` returns recent durable demo snapshots for the operations console.
+- `GET /v1/demo/payments/{paymentId}` returns one immutable state/provider timeline.
+
+These routes accept no payee, amount, provider scenario, tenant, or credential input. They are
+disabled by default and configuration validation rejects demo mode in production. Partner and
+provider APIs remain HMAC-authenticated; neither React bundle receives signing material. Local
+Vite servers proxy `/api` to the Fastify process so no permissive CORS policy is required.
+
 Health endpoints are separate:
 
 - `GET /health/live`

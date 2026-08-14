@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  DemoPaymentSnapshotSchema,
+  DemoRunRequestSchema,
   PartnerWebhookEnvelopeSchema,
   PaymentIntentRequestSchema,
   PaymentSubmissionRequestSchema,
@@ -76,5 +78,24 @@ describe('payment intent contracts', () => {
     expect(PartnerWebhookEnvelopeSchema.safeParse({ ...envelope, unexpected: true }).success).toBe(
       false,
     );
+  });
+
+  it('publishes strict browser-safe demo contracts', () => {
+    expect(DemoRunRequestSchema.parse({ run_id: 'run_12345678' })).toEqual({
+      run_id: 'run_12345678',
+    });
+    expect(
+      DemoRunRequestSchema.safeParse({ run_id: '../unsafe', scenario: 'anything' }).success,
+    ).toBe(false);
+    expect(
+      DemoPaymentSnapshotSchema.safeParse({
+        scenario: {
+          key: 'trusted-payment',
+          label: 'Trusted everyday payment',
+          merchant_name: 'Aarav Electronics',
+          amount_paise: 24_900,
+        },
+      }).success,
+    ).toBe(false);
   });
 });

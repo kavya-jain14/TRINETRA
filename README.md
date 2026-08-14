@@ -14,6 +14,7 @@ UI shells, CI, and local infrastructure. Package 0B now adds:
 - submit-once deterministic PSP adapter behavior;
 - authenticated, idempotent provider callbacks that cannot regress state;
 - status-first pending recovery, reversal/complaint clocks, and BullMQ processors;
+- a live fixed-scenario consumer journey and polling operations timeline backed by PostgreSQL;
 - repository, domain-property, API integration, and worker recovery tests. CI exercises the signed API against real PostgreSQL 17 and Redis 7.4 services, including cross-replica nonce replay rejection and active readiness checks.
 
 ## Quick start
@@ -35,8 +36,13 @@ Services:
 - API liveness: `http://localhost:4000/health/live`
 - OpenAPI: `http://localhost:4000/openapi.json`
 - PSP sandbox: `http://localhost:4100`
-- Operations console: Vite prints its local URL
-- Consumer demo: Vite prints its local URL
+- Operations console: `http://localhost:5173`
+- Consumer demo: `http://localhost:5174`
+
+With `DEMO_MODE=true` in the local `.env`, open both React apps and select **Continue securely**
+in the consumer demo. The fixed ₹249 scenario is evaluated and submitted on the server; the
+operations console polls the durable timeline. Partner HMAC material is never sent to either
+browser. Demo orchestration cannot be enabled when `NODE_ENV=production`.
 
 Run the complete local quality gate with `pnpm verify`.
 
@@ -49,7 +55,11 @@ See [Architecture](docs/ARCHITECTURE.md), [API and events](docs/API_AND_EVENTS.m
 
 ## First integration checkpoint
 
-Consumer demo creates a synthetic ₹249 trusted-merchant intent → API returns three low scores and `ALLOW` → PSP sandbox returns signed success → operations console displays one immutable payment timeline.
+Consumer demo creates a synthetic ₹249 trusted-merchant intent → API returns three low scores and
+`ALLOW` → deterministic PSP adapter resolves `SUCCESS` → operations console displays one immutable
+payment timeline. The signed provider-callback path remains independently covered by API contract
+tests.
 
-The backend now implements and tests this decision-to-ledger-to-provider flow. Package 0C wires
-the operations and consumer interfaces to the published contracts.
+The backend and Package 0C interfaces now implement this checkpoint against published contracts.
+The real PostgreSQL integration test verifies that another API replica can read the same durable
+success timeline.
