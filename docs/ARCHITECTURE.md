@@ -37,6 +37,15 @@ retry instruction. `packages/database` implements the port with row locks, optim
 versions, append-only state/provider events, tenant-scoped keys, and a transactional outbox.
 Provider callbacks are signed and idempotent; old callbacks cannot move a payment backward.
 
+## Golden-flow demo boundary
+
+The consumer and operations applications never hold a partner HMAC secret. In explicit local demo
+mode, Fastify exposes a fixed synthetic scenario command and read-only durable timeline views. The
+command accepts only an opaque run ID, uses the same risk and payment services as partner routes,
+and cannot select arbitrary amounts, payees, tenants, or provider behaviours. Production
+configuration rejects demo mode. The operations console polls PostgreSQL-backed snapshots, so a
+refresh or another API replica observes the same payment state.
+
 ## Module boundary rule
 
 Fastify handlers validate, authenticate, call application/domain services, and map responses. They do not contain scoring predicates or payment-transition tables. UI code consumes published contracts and never infers canonical states from provider text.

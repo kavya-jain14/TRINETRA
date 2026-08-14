@@ -278,6 +278,21 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
     return row ? toPayment(row) : null;
   }
 
+  async listPayments(tenantId: string, limit: number): Promise<PaymentIntentRecord[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Payment list limit must be between 1 and 100.');
+    }
+    const result = await this.pool.query<PaymentRow>(
+      `SELECT ${paymentProjection}
+         FROM payment_intents
+        WHERE tenant_id = $1
+        ORDER BY created_at DESC, external_ref DESC
+        LIMIT $2`,
+      [tenantId, limit],
+    );
+    return result.rows.map(toPayment);
+  }
+
   async transitionPayment(input: TransitionPaymentInput): Promise<PaymentIntentRecord> {
     return await this.#transaction(async (client) => {
       const row = await this.#requirePayment(client, input.tenantId, input.paymentId, true);

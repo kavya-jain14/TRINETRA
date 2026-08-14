@@ -214,6 +214,20 @@ export class InMemoryPaymentLedgerRepository implements PaymentLedgerRepository 
     return payment ? clonePayment(payment) : null;
   }
 
+  async listPayments(tenantId: string, limit: number): Promise<PaymentIntentRecord[]> {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
+      throw new RangeError('Payment list limit must be between 1 and 100.');
+    }
+    return [...this.#payments.values()]
+      .filter((payment) => payment.tenantId === tenantId)
+      .sort((left, right) => {
+        const byCreatedAt = right.createdAt.getTime() - left.createdAt.getTime();
+        return byCreatedAt === 0 ? right.id.localeCompare(left.id) : byCreatedAt;
+      })
+      .slice(0, limit)
+      .map(clonePayment);
+  }
+
   async transitionPayment(input: TransitionPaymentInput): Promise<PaymentIntentRecord> {
     const payment = this.#requirePayment(input.tenantId, input.paymentId);
     if (payment.state === input.toState) return clonePayment(payment);

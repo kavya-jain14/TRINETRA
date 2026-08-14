@@ -12,6 +12,7 @@ import {
 import { InMemoryNonceStore, type NonceStore } from '@trinetra/security';
 
 import { registerHealthRoutes } from './routes/health.js';
+import { registerDemoRoutes } from './routes/demo.js';
 import { registerPaymentIntentRoutes } from './routes/payment-intents.js';
 import { registerPaymentOperationRoutes } from './routes/payment-operations.js';
 
@@ -29,6 +30,7 @@ export interface AppConfig {
   providerCallbackSecret?: string;
   trustedDeviceTokens?: readonly string[];
   readinessChecks?: Readonly<Record<string, () => Promise<void>>>;
+  demoMode?: boolean;
   logger?: boolean;
 }
 
@@ -41,9 +43,10 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
 
   const now = config.now ?? (() => new Date());
   const nonceStore = config.nonceStore ?? new InMemoryNonceStore();
+  const repository = config.ledgerRepository ?? new InMemoryPaymentLedgerRepository();
   const provider = config.paymentProvider ?? new DeterministicPaymentProviderAdapter();
   const ledgerService = new PaymentLedgerService({
-    repository: config.ledgerRepository ?? new InMemoryPaymentLedgerRepository(),
+    repository,
     provider,
     now,
   });
@@ -75,6 +78,9 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     ledgerService,
     tenantId,
   });
+  if (config.demoMode) {
+    await registerDemoRoutes(app, { ledgerService, repository, tenantId, now });
+  }
 
   app.setNotFoundHandler((request, reply) =>
     reply.code(404).send({

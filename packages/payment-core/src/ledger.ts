@@ -181,6 +181,7 @@ export interface RecordRecoverySignalInput {
 export interface PaymentLedgerRepository {
   createPayment(input: CreatePaymentInput): Promise<CreatePaymentResult>;
   getPayment(tenantId: string, paymentId: string): Promise<PaymentIntentRecord | null>;
+  listPayments(tenantId: string, limit: number): Promise<PaymentIntentRecord[]>;
   transitionPayment(input: TransitionPaymentInput): Promise<PaymentIntentRecord>;
   prepareProviderAttempt(input: PrepareProviderAttemptInput): Promise<PrepareProviderAttemptResult>;
   completeProviderAttempt(input: CompleteProviderAttemptInput): Promise<ProviderEventResult>;

@@ -36,6 +36,7 @@ const app = await buildApp({
       if ((await redis.ping()) !== 'PONG') throw new Error('Redis ping failed');
     },
   },
+  demoMode: env.DEMO_MODE,
   logger: true,
 });
 redis.on('error', (error) => app.log.error({ err: error }, 'Redis connection error'));

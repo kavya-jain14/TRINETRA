@@ -271,6 +271,10 @@ describe('Postgres payment ledger repository', () => {
     expect(replay.outcome).toBe('REPLAY');
     expect(replay.payment.id).toBe('pi_pg_payment_001');
     expect(await repository.getPayment(tenantB, 'pi_pg_payment_001')).toBeNull();
+    expect((await repository.listPayments(tenantA, 10)).map((payment) => payment.id)).toEqual([
+      'pi_pg_payment_001',
+    ]);
+    expect(await repository.listPayments(tenantB, 10)).toEqual([]);
 
     await expect(
       repository.transitionPayment({

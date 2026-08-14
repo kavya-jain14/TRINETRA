@@ -66,6 +66,18 @@ describe('payment ledger service', () => {
     expect(new Set(outbox.map((event) => event.eventKey)).size).toBe(outbox.length);
   });
 
+  it('lists recent payments within the requested tenant and validates bounds', async () => {
+    const { repository, service } = buildHarness();
+    await createAllowedPayment(service, 'pi_payment_001', 'idem_payment_001');
+    await createAllowedPayment(service, 'pi_payment_002', 'idem_payment_002');
+
+    expect((await repository.listPayments(tenantA, 1)).map((payment) => payment.id)).toEqual([
+      'pi_payment_002',
+    ]);
+    expect(await repository.listPayments(tenantB, 10)).toEqual([]);
+    await expect(repository.listPayments(tenantA, 0)).rejects.toThrow(RangeError);
+  });
+
   it('deduplicates callbacks and ignores a stale PENDING after success', async () => {
     const { repository, service } = buildHarness();
     await createAllowedPayment(service);

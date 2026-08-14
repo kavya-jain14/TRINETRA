@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@trinetra/contracts": "workspace:*",
     "@trinetra/ui": "workspace:*",
     "react": "19.2.8",
     "react-dom": "19.2.8"

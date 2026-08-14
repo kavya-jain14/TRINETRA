@@ -76,6 +76,10 @@
   font-weight: 800;
 }
 
+.payment-card button:not(:disabled) {
+  cursor: pointer;
+}
+
 .payment-card button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
@@ -85,4 +89,56 @@
   margin: 1rem 0 0;
   font-size: 0.75rem;
   line-height: 1.5;
+}
+
+.payment-result {
+  margin: 0 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--safe), var(--line) 55%);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--safe) 8%, var(--surface));
+  text-align: left;
+}
+
+.result-state {
+  margin-bottom: 0.9rem;
+  color: var(--safe);
+  font-weight: 800;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.result-grid strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.payment-result code {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.9rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error-message {
+  color: var(--risk);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 480px) {
+  .result-grid {
+    grid-template-columns: 1fr;
+  }
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { apiEnvSchema } from '@trinetra/config';
 import { canonicalJson, signPartnerRequest } from '@trinetra/security';
 import { InMemoryPaymentLedgerRepository } from '@trinetra/payment-core';
 
@@ -66,6 +67,21 @@ function providerHeaders(body: object, nonce: string) {
 }
 
 describe('TRINETRA partner API foundation', () => {
+  it('rejects demo orchestration in production configuration', () => {
+    const baseEnv = {
+      DATABASE_URL: 'postgresql://trinetra:secret@localhost:5432/trinetra',
+      REDIS_URL: 'redis://localhost:6379',
+      DEMO_PARTNER_SECRET: partnerSecret,
+    };
+
+    expect(
+      apiEnvSchema.safeParse({ ...baseEnv, NODE_ENV: 'production', DEMO_MODE: 'true' }).success,
+    ).toBe(false);
+    expect(
+      apiEnvSchema.parse({ ...baseEnv, NODE_ENV: 'development', DEMO_MODE: 'true' }).DEMO_MODE,
+    ).toBe(true);
+  });
+
   it('keeps liveness separate from partner authentication', async () => {
     const app = await buildApp({
       partnerKey: 'partner_demo',
@@ -360,6 +376,102 @@ describe('TRINETRA partner API foundation', () => {
     });
     expect(response.statusCode).toBe(401);
     expect(response.json().error.code).toBe('AUTH_REQUIRED');
+    await app.close();
+  });
+
+  it('does not register browser demo orchestration unless demo mode is explicit', async () => {
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/trusted-payment/run',
+      payload: { run_id: 'run_disabled01' },
+    });
+
+    expect(response.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('runs and replays the live trusted-payment demo without exposing partner secrets', async () => {
+    const repository = new InMemoryPaymentLedgerRepository();
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      ledgerRepository: repository,
+      demoMode: true,
+    });
+    const payload = { run_id: 'run_golden001' };
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/trusted-payment/run',
+      payload,
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/trusted-payment/run',
+      payload,
+    });
+    const listed = await app.inject({ method: 'GET', url: '/v1/demo/payments?limit=8' });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      scenario: { key: 'trusted-payment', amount_paise: 24_900 },
+      assessment: {
+        decision: 'ALLOW',
+        risk_score: 8,
+        subscores: { identity: 8, intent: 6, integrity: 4 },
+      },
+      payment: { state: 'SUCCEEDED' },
+      provider_attempts: [
+        {
+          operation: 'SUBMIT',
+          status: 'COMPLETED',
+          provider_status: 'SUCCEEDED',
+        },
+      ],
+    });
+    expect(created.json().timeline.map((event: { to_state: string }) => event.to_state)).toEqual([
+      'CREATED',
+      'RISK_EVALUATING',
+      'ALLOWED',
+      'SUBMITTED',
+      'SUCCEEDED',
+    ]);
+    expect(JSON.stringify(created.json())).not.toContain(partnerSecret);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().payment.payment_intent_id).toBe(created.json().payment.payment_intent_id);
+    expect(replay.json().provider_attempts).toHaveLength(1);
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json().payments).toHaveLength(1);
+    await app.close();
+  });
+
+  it('rejects malformed demo identifiers and hides non-demo payments from demo reads', async () => {
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      demoMode: true,
+    });
+
+    const invalidRun = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/trusted-payment/run',
+      payload: { run_id: '../unsafe' },
+    });
+    const missing = await app.inject({
+      method: 'GET',
+      url: '/v1/demo/payments/pi_demo_12345678',
+    });
+
+    expect(invalidRun.statusCode).toBe(400);
+    expect(missing.statusCode).toBe(404);
     await app.close();
   });
 });
