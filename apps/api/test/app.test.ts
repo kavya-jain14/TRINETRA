@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { InMemoryCaseRepository } from '@trinetra/case-core';
 import { apiEnvSchema } from '@trinetra/config';
 import { canonicalJson, signPartnerRequest } from '@trinetra/security';
 import { InMemoryPaymentLedgerRepository } from '@trinetra/payment-core';
@@ -154,6 +155,57 @@ describe('TRINETRA partner API foundation', () => {
       subscores: { identity: 8, intent: 6, integrity: 4 },
       rule_set_version: 'ruleset_foundation_1',
     });
+    await app.close();
+  });
+
+  it('opens one durable case for a signed BLOCK assessment and replays it idempotently', async () => {
+    const caseRepository = new InMemoryCaseRepository();
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      caseRepository,
+    });
+    const blockedIntent = {
+      ...trustedIntent,
+      direction: 'COLLECT',
+      payment_type: 'P2P',
+      merchant: undefined,
+      context: {
+        ...trustedIntent.context,
+        channel: 'UPI_COLLECT',
+        user_claimed_goal: 'RECEIVE_REFUND',
+        remote_access_active: true,
+      },
+    } as const;
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/payment-intents',
+      headers: signedHeaders(blockedIntent, 'nonce_signed_block_001', 'idem_signed_block_001'),
+      payload: blockedIntent,
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/payment-intents',
+      headers: signedHeaders(blockedIntent, 'nonce_signed_block_002', 'idem_signed_block_001'),
+      payload: blockedIntent,
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      decision: 'BLOCK',
+      required_action: { type: 'STOP_PAYMENT' },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().case_id).toBe(created.json().case_id);
+    expect(await caseRepository.listCases('00000000-0000-4000-8000-000000000001', 10)).toEqual([
+      expect.objectContaining({
+        id: created.json().case_id,
+        paymentId: created.json().payment_intent_id,
+        status: 'OPEN',
+      }),
+    ]);
     await app.close();
   });
 
@@ -449,6 +501,93 @@ describe('TRINETRA partner API foundation', () => {
     expect(replay.json().provider_attempts).toHaveLength(1);
     expect(listed.statusCode).toBe(200);
     expect(listed.json().payments).toHaveLength(1);
+    await app.close();
+  });
+
+  it('blocks the deceptive refund collect flow, opens one case, and never calls the provider', async () => {
+    const repository = new InMemoryPaymentLedgerRepository();
+    const caseRepository = new InMemoryCaseRepository();
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      ledgerRepository: repository,
+      caseRepository,
+      demoMode: true,
+    });
+    const payload = { run_id: 'run_refund001' };
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/refund-collect/run',
+      payload,
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/refund-collect/run',
+      payload,
+    });
+    const cases = await app.inject({ method: 'GET', url: '/v1/demo/cases?limit=8' });
+    const paymentId = created.json().payment.payment_intent_id as string;
+    const submitBody = { scenario: 'SUCCESS_IMMEDIATE' } as const;
+    const submitPath = `/v1/payment-intents/${paymentId}/submit`;
+    const forbiddenSubmit = await app.inject({
+      method: 'POST',
+      url: submitPath,
+      headers: signedHeaders(
+        submitBody,
+        'nonce_blocked_submit_001',
+        'idem_blocked_submit_001',
+        submitPath,
+      ),
+      payload: submitBody,
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      scenario: { key: 'refund-collect', amount_paise: 199_900, direction: 'COLLECT' },
+      assessment: {
+        decision: 'BLOCK',
+        risk_score: 98,
+        required_action: { type: 'STOP_PAYMENT' },
+        reasons: [
+          expect.objectContaining({ code: 'REMOTE_ACCESS_ACTIVE' }),
+          expect.objectContaining({ code: 'REFUND_COLLECT_CONFLICT' }),
+          expect.objectContaining({ code: 'NEW_BENEFICIARY' }),
+        ],
+      },
+      payment: { state: 'BLOCKED', provider_request_ref: null },
+      provider_attempts: [],
+      fraud_case: {
+        status: 'OPEN',
+        severity: 'CRITICAL',
+        category: 'SOCIAL_ENGINEERING',
+        evidence: [
+          expect.objectContaining({ code: 'REMOTE_ACCESS_ACTIVE', lens: 'INTEGRITY' }),
+          expect.objectContaining({ code: 'REFUND_COLLECT_CONFLICT', lens: 'INTENT' }),
+          expect.objectContaining({ code: 'NEW_BENEFICIARY', lens: 'INTENT' }),
+        ],
+      },
+    });
+    expect(created.json().timeline.map((event: { to_state: string }) => event.to_state)).toEqual([
+      'CREATED',
+      'RISK_EVALUATING',
+      'BLOCKED',
+    ]);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().fraud_case.case_id).toBe(created.json().fraud_case.case_id);
+    expect(cases.statusCode).toBe(200);
+    expect(cases.json().cases).toHaveLength(1);
+    expect(forbiddenSubmit.statusCode).toBe(409);
+    expect(forbiddenSubmit.json().error.code).toBe('ILLEGAL_STATE_TRANSITION');
+    expect(
+      await repository.listProviderAttempts('00000000-0000-4000-8000-000000000001', paymentId),
+    ).toEqual([]);
+    expect(
+      JSON.stringify(
+        await repository.getPayment('00000000-0000-4000-8000-000000000001', paymentId),
+      ),
+    ).not.toContain('Synthetic Refund Desk');
     await app.close();
   });
 

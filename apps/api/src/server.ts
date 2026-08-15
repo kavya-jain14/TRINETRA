@@ -3,6 +3,7 @@ import { Redis } from 'ioredis';
 import {
   createDatabase,
   ensureTenant,
+  PostgresCaseRepository,
   PostgresDeterministicPaymentProviderAdapter,
   PostgresPaymentLedgerRepository,
 } from '@trinetra/database';
@@ -23,6 +24,7 @@ const app = await buildApp({
   partnerSecret: env.DEMO_PARTNER_SECRET,
   logLevel: env.LOG_LEVEL,
   ledgerRepository: new PostgresPaymentLedgerRepository(pool),
+  caseRepository: new PostgresCaseRepository(pool),
   paymentProvider: new PostgresDeterministicPaymentProviderAdapter(pool),
   nonceStore: new RedisNonceStore(redis),
   tenantId: env.DEMO_TENANT_ID,

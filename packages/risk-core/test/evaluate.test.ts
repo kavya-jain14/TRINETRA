@@ -45,11 +45,12 @@ describe('three-eye deterministic evaluation', () => {
         direction: 'COLLECT',
         context: { ...trustedIntent.context, user_claimed_goal: 'RECEIVE_REFUND' },
       },
-      context,
+      { ...context, beneficiaryTrust: 'NEW' },
     );
 
     expect(result.decision).toBe('BLOCK');
     expect(result.reasons[0]?.code).toBe('REFUND_COLLECT_CONFLICT');
+    expect(result.reasons).toContainEqual(expect.objectContaining({ code: 'NEW_BENEFICIARY' }));
   });
 
   it('does not infer trust from a token containing the word trusted', () => {

@@ -3,12 +3,16 @@ import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
+import type { CaseRepository, CaseService, FraudCaseRecord } from '@trinetra/case-core';
 import {
   DemoPaymentListSchema,
   DemoPaymentSnapshotSchema,
   DemoRunRequestSchema,
+  FraudCaseListSchema,
+  FraudCaseSnapshotSchema,
   PaymentResourceSchema,
   RiskAssessmentSchema,
+  type DemoScenario,
   type PaymentIntentRequest,
 } from '@trinetra/contracts';
 import {
@@ -22,7 +26,10 @@ import { canonicalJson, sha256Hex } from '@trinetra/security';
 const DemoPaymentParamsSchema = z.object({
   paymentId: z.string().startsWith('pi_demo_').max(96),
 });
-const DemoPaymentListQuerySchema = z.object({
+const DemoCaseParamsSchema = z.object({
+  caseId: z.string().startsWith('case_demo_').max(104),
+});
+const DemoListQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(20).default(8),
 });
 
@@ -50,16 +57,51 @@ const trustedPaymentIntent = {
   },
 } as const satisfies PaymentIntentRequest;
 
-const scenario = {
-  key: 'trusted-payment',
-  label: 'Trusted everyday payment',
-  merchant_name: 'Aarav Electronics',
-  amount_paise: 24_900,
-} as const;
+const refundCollectIntent = {
+  partner_customer_ref: 'cust_demo_104',
+  direction: 'COLLECT',
+  payment_type: 'P2P',
+  amount_paise: 199_900,
+  currency: 'INR',
+  beneficiary: {
+    vpa_token: 'vpa_tok_new_refund_agent',
+    resolved_name: 'Synthetic Refund Desk',
+  },
+  context: {
+    channel: 'UPI_COLLECT',
+    device_token: 'dev_tok_trusted',
+    session_ref: 'sess_demo_refund_collect',
+    user_claimed_goal: 'RECEIVE_REFUND',
+    remote_access_active: true,
+  },
+} as const satisfies PaymentIntentRequest;
+
+const scenarios = {
+  'trusted-payment': {
+    key: 'trusted-payment',
+    label: 'Trusted everyday payment',
+    counterparty_name: 'Aarav Electronics',
+    amount_paise: 24_900,
+    direction: 'PUSH',
+    claimed_goal: 'PAY_MERCHANT',
+  },
+  'refund-collect': {
+    key: 'refund-collect',
+    label: 'Deceptive refund collect request',
+    counterparty_name: 'Synthetic Refund Desk',
+    amount_paise: 199_900,
+    direction: 'COLLECT',
+    claimed_goal: 'RECEIVE_REFUND',
+  },
+} as const satisfies Readonly<Record<string, DemoScenario>>;
+
+type ScenarioKey = keyof typeof scenarios;
 
 export interface DemoRouteConfig {
   ledgerService: PaymentLedgerService;
   repository: PaymentLedgerRepository;
+  caseService: CaseService;
+  caseRepository: CaseRepository;
   tenantId: string;
   now: () => Date;
 }
@@ -79,14 +121,66 @@ function paymentResource(payment: PaymentIntentRecord) {
   });
 }
 
-async function paymentSnapshot(repository: PaymentLedgerRepository, payment: PaymentIntentRecord) {
-  const [timeline, attempts] = await Promise.all([
-    repository.listStateEvents(payment.tenantId, payment.id),
-    repository.listProviderAttempts(payment.tenantId, payment.id),
+function minimizedRequest(input: PaymentIntentRequest) {
+  return {
+    partner_customer_ref: input.partner_customer_ref,
+    direction: input.direction,
+    payment_type: input.payment_type,
+    amount_paise: input.amount_paise,
+    currency: input.currency,
+    beneficiary: { vpa_token: input.beneficiary.vpa_token },
+    merchant: input.merchant
+      ? {
+          merchant_ref: input.merchant.merchant_ref,
+          payee_name_matches_merchant: true,
+          mcc: input.merchant.mcc,
+        }
+      : undefined,
+    context: input.context,
+  };
+}
+
+function scenarioKeyFor(payment: PaymentIntentRecord): ScenarioKey | null {
+  if (payment.idempotencyKey.startsWith('demo:trusted-payment:')) return 'trusted-payment';
+  if (payment.idempotencyKey.startsWith('demo:refund-collect:')) return 'refund-collect';
+  return null;
+}
+
+async function caseSnapshot(repository: CaseRepository, fraudCase: FraudCaseRecord) {
+  const timeline = await repository.listCaseEvents(fraudCase.tenantId, fraudCase.id);
+  return FraudCaseSnapshotSchema.parse({
+    case_id: fraudCase.id,
+    payment_intent_id: fraudCase.paymentId,
+    status: fraudCase.status,
+    severity: fraudCase.severity,
+    category: fraudCase.category,
+    summary: fraudCase.summary,
+    evidence: fraudCase.evidence,
+    timeline: timeline.map((event) => ({
+      event_id: event.id,
+      event_type: event.eventType,
+      source: event.source,
+      payload: event.payload,
+      resource_version: event.resourceVersion,
+      occurred_at: event.occurredAt.toISOString(),
+    })),
+    resource_version: fraudCase.resourceVersion,
+    opened_at: fraudCase.openedAt.toISOString(),
+    updated_at: fraudCase.updatedAt.toISOString(),
+  });
+}
+
+async function paymentSnapshot(config: DemoRouteConfig, payment: PaymentIntentRecord) {
+  const scenarioKey = scenarioKeyFor(payment);
+  if (!scenarioKey) throw new Error('Payment does not belong to a published demo scenario.');
+  const [timeline, attempts, fraudCase] = await Promise.all([
+    config.repository.listStateEvents(payment.tenantId, payment.id),
+    config.repository.listProviderAttempts(payment.tenantId, payment.id),
+    config.caseRepository.getCaseByPayment(payment.tenantId, payment.id),
   ]);
 
   return DemoPaymentSnapshotSchema.parse({
-    scenario,
+    scenario: scenarios[scenarioKey],
     assessment: RiskAssessmentSchema.parse(payment.responseBody),
     payment: paymentResource(payment),
     timeline: timeline.map((event) => ({
@@ -107,97 +201,102 @@ async function paymentSnapshot(repository: PaymentLedgerRepository, payment: Pay
       created_at: attempt.createdAt.toISOString(),
       completed_at: attempt.completedAt?.toISOString() ?? null,
     })),
+    fraud_case: fraudCase ? await caseSnapshot(config.caseRepository, fraudCase) : null,
   });
+}
+
+async function runScenario(config: DemoRouteConfig, scenarioKey: ScenarioKey, runId: string) {
+  const intent: PaymentIntentRequest =
+    scenarioKey === 'trusted-payment' ? trustedPaymentIntent : refundCollectIntent;
+  const paymentId = paymentIdFor(`${scenarioKey}:${runId}`);
+  const evaluated = RiskAssessmentSchema.parse(
+    evaluatePaymentIntent(intent, {
+      now: config.now(),
+      paymentIntentId: paymentId,
+      traceId: `tr_demo_${paymentId.slice('pi_demo_'.length)}`,
+      deviceTrust: 'TRUSTED',
+      beneficiaryTrust: scenarioKey === 'refund-collect' ? 'NEW' : 'KNOWN',
+    }),
+  );
+  const created = await config.ledgerService.createRiskEvaluatedPayment({
+    paymentId,
+    tenantId: config.tenantId,
+    partnerCustomerRef: intent.partner_customer_ref,
+    idempotencyKey: `demo:${scenarioKey}:${runId}`,
+    requestHash: sha256Hex(canonicalJson(intent)),
+    requestBody: minimizedRequest(intent),
+    responseBody: evaluated,
+    amountPaise: intent.amount_paise,
+    currency: intent.currency,
+    decision: evaluated.decision,
+  });
+
+  const persistedAssessment = RiskAssessmentSchema.parse(created.responseBody);
+  await config.caseService.ensureBlockedPaymentCase(
+    config.tenantId,
+    created.payment.id,
+    persistedAssessment,
+  );
+
+  let payment = created.payment;
+  if (scenarioKey === 'trusted-payment' && payment.state === 'ALLOWED') {
+    const submitted = await config.ledgerService.submitPayment(
+      config.tenantId,
+      payment.id,
+      'SUCCESS_IMMEDIATE',
+      {
+        key: `demo-submit:${runId}`,
+        requestHash: sha256Hex(canonicalJson({ scenario: 'SUCCESS_IMMEDIATE' })),
+      },
+    );
+    payment = submitted.payment;
+  }
+
+  return {
+    statusCode: created.outcome === 'CREATED' ? 201 : 200,
+    snapshot: await paymentSnapshot(config, payment),
+  } as const;
+}
+
+function validationError(requestId: string, message: string) {
+  return {
+    error: {
+      code: 'VALIDATION_FAILED',
+      message,
+      trace_id: `tr_${requestId}`,
+    },
+  } as const;
 }
 
 export async function registerDemoRoutes(
   app: FastifyInstance,
   config: DemoRouteConfig,
 ): Promise<void> {
-  app.post('/v1/demo/scenarios/trusted-payment/run', async (request, reply) => {
-    const parsed = DemoRunRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply.code(400).send({
-        error: {
-          code: 'VALIDATION_FAILED',
-          message: 'Demo run identifier is invalid.',
-          trace_id: `tr_${request.id}`,
-        },
-      });
-    }
-
-    const paymentId = paymentIdFor(parsed.data.run_id);
-    const assessment = RiskAssessmentSchema.parse(
-      evaluatePaymentIntent(trustedPaymentIntent, {
-        now: config.now(),
-        paymentIntentId: paymentId,
-        traceId: `tr_demo_${paymentId.slice('pi_demo_'.length)}`,
-        deviceTrust: 'TRUSTED',
-      }),
-    );
-    const created = await config.ledgerService.createRiskEvaluatedPayment({
-      paymentId,
-      tenantId: config.tenantId,
-      partnerCustomerRef: trustedPaymentIntent.partner_customer_ref,
-      idempotencyKey: `demo:trusted-payment:${parsed.data.run_id}`,
-      requestHash: sha256Hex(canonicalJson(trustedPaymentIntent)),
-      requestBody: {
-        partner_customer_ref: trustedPaymentIntent.partner_customer_ref,
-        direction: trustedPaymentIntent.direction,
-        payment_type: trustedPaymentIntent.payment_type,
-        amount_paise: trustedPaymentIntent.amount_paise,
-        currency: trustedPaymentIntent.currency,
-        beneficiary: { vpa_token: trustedPaymentIntent.beneficiary.vpa_token },
-        merchant: {
-          merchant_ref: trustedPaymentIntent.merchant.merchant_ref,
-          payee_name_matches_merchant: true,
-          mcc: trustedPaymentIntent.merchant.mcc,
-        },
-        context: trustedPaymentIntent.context,
-      },
-      responseBody: assessment,
-      amountPaise: trustedPaymentIntent.amount_paise,
-      currency: trustedPaymentIntent.currency,
-      decision: assessment.decision,
+  for (const scenarioKey of ['trusted-payment', 'refund-collect'] as const) {
+    app.post(`/v1/demo/scenarios/${scenarioKey}/run`, async (request, reply) => {
+      const parsed = DemoRunRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply.code(400).send(validationError(request.id, 'Demo run identifier is invalid.'));
+      }
+      const result = await runScenario(config, scenarioKey, parsed.data.run_id);
+      return reply.code(result.statusCode).send(result.snapshot);
     });
-
-    let payment = created.payment;
-    if (payment.state === 'ALLOWED') {
-      const submitted = await config.ledgerService.submitPayment(
-        config.tenantId,
-        payment.id,
-        'SUCCESS_IMMEDIATE',
-        {
-          key: `demo-submit:${parsed.data.run_id}`,
-          requestHash: sha256Hex(canonicalJson({ scenario: 'SUCCESS_IMMEDIATE' })),
-        },
-      );
-      payment = submitted.payment;
-    }
-
-    return reply
-      .code(created.outcome === 'CREATED' ? 201 : 200)
-      .send(await paymentSnapshot(config.repository, payment));
-  });
+  }
 
   app.get('/v1/demo/payments', async (request, reply) => {
-    const parsed = DemoPaymentListQuerySchema.safeParse(request.query);
+    const parsed = DemoListQuerySchema.safeParse(request.query);
     if (!parsed.success) {
-      return reply.code(400).send({
-        error: {
-          code: 'VALIDATION_FAILED',
-          message: 'Demo payment list query is invalid.',
-          trace_id: `tr_${request.id}`,
-        },
-      });
+      return reply
+        .code(400)
+        .send(validationError(request.id, 'Demo payment list query is invalid.'));
     }
 
     const payments = (await config.repository.listPayments(config.tenantId, 100))
-      .filter((payment) => payment.idempotencyKey.startsWith('demo:trusted-payment:'))
+      .filter((payment) => scenarioKeyFor(payment) !== null)
       .slice(0, parsed.data.limit);
     return DemoPaymentListSchema.parse({
       payments: await Promise.all(
-        payments.map(async (payment) => await paymentSnapshot(config.repository, payment)),
+        payments.map(async (payment) => await paymentSnapshot(config, payment)),
       ),
     });
   });
@@ -205,16 +304,12 @@ export async function registerDemoRoutes(
   app.get('/v1/demo/payments/:paymentId', async (request, reply) => {
     const parsed = DemoPaymentParamsSchema.safeParse(request.params);
     if (!parsed.success) {
-      return reply.code(400).send({
-        error: {
-          code: 'VALIDATION_FAILED',
-          message: 'Demo payment identifier is invalid.',
-          trace_id: `tr_${request.id}`,
-        },
-      });
+      return reply
+        .code(400)
+        .send(validationError(request.id, 'Demo payment identifier is invalid.'));
     }
     const payment = await config.repository.getPayment(config.tenantId, parsed.data.paymentId);
-    if (!payment || !payment.idempotencyKey.startsWith('demo:trusted-payment:')) {
+    if (!payment || scenarioKeyFor(payment) === null) {
       return reply.code(404).send({
         error: {
           code: 'NOT_FOUND',
@@ -223,6 +318,39 @@ export async function registerDemoRoutes(
         },
       });
     }
-    return await paymentSnapshot(config.repository, payment);
+    return await paymentSnapshot(config, payment);
+  });
+
+  app.get('/v1/demo/cases', async (request, reply) => {
+    const parsed = DemoListQuerySchema.safeParse(request.query);
+    if (!parsed.success) {
+      return reply.code(400).send(validationError(request.id, 'Demo case list query is invalid.'));
+    }
+    const cases = (await config.caseRepository.listCases(config.tenantId, 100))
+      .filter((fraudCase) => fraudCase.paymentId.startsWith('pi_demo_'))
+      .slice(0, parsed.data.limit);
+    return FraudCaseListSchema.parse({
+      cases: await Promise.all(
+        cases.map(async (fraudCase) => await caseSnapshot(config.caseRepository, fraudCase)),
+      ),
+    });
+  });
+
+  app.get('/v1/demo/cases/:caseId', async (request, reply) => {
+    const parsed = DemoCaseParamsSchema.safeParse(request.params);
+    if (!parsed.success) {
+      return reply.code(400).send(validationError(request.id, 'Demo case identifier is invalid.'));
+    }
+    const fraudCase = await config.caseRepository.getCase(config.tenantId, parsed.data.caseId);
+    if (!fraudCase) {
+      return reply.code(404).send({
+        error: {
+          code: 'NOT_FOUND',
+          message: 'Demo fraud case was not found.',
+          trace_id: `tr_${request.id}`,
+        },
+      });
+    }
+    return await caseSnapshot(config.caseRepository, fraudCase);
   });
 }

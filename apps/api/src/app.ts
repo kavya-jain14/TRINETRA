@@ -1,5 +1,6 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 
+import { CaseService, InMemoryCaseRepository, type CaseRepository } from '@trinetra/case-core';
 import { openApiDocument } from '@trinetra/contracts';
 import { createLoggerOptions } from '@trinetra/observability';
 import {
@@ -25,6 +26,7 @@ export interface AppConfig {
   now?: () => Date;
   nonceStore?: NonceStore;
   ledgerRepository?: PaymentLedgerRepository;
+  caseRepository?: CaseRepository;
   paymentProvider?: PaymentProviderAdapter;
   tenantId?: string;
   providerCallbackSecret?: string;
@@ -44,12 +46,14 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   const now = config.now ?? (() => new Date());
   const nonceStore = config.nonceStore ?? new InMemoryNonceStore();
   const repository = config.ledgerRepository ?? new InMemoryPaymentLedgerRepository();
+  const caseRepository = config.caseRepository ?? new InMemoryCaseRepository();
   const provider = config.paymentProvider ?? new DeterministicPaymentProviderAdapter();
   const ledgerService = new PaymentLedgerService({
     repository,
     provider,
     now,
   });
+  const caseService = new CaseService(caseRepository, now);
   const tenantId = config.tenantId ?? defaultTenantId;
   const trustedDeviceTokens = new Set(config.trustedDeviceTokens ?? ['dev_tok_trusted']);
 
@@ -65,6 +69,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     now,
     clockSkewSeconds: 300,
     ledgerService,
+    caseService,
     tenantId,
     isTrustedDeviceToken: (deviceToken) => trustedDeviceTokens.has(deviceToken),
   });
@@ -79,7 +84,14 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     tenantId,
   });
   if (config.demoMode) {
-    await registerDemoRoutes(app, { ledgerService, repository, tenantId, now });
+    await registerDemoRoutes(app, {
+      ledgerService,
+      repository,
+      caseService,
+      caseRepository,
+      tenantId,
+      now,
+    });
   }
 
   app.setNotFoundHandler((request, reply) =>

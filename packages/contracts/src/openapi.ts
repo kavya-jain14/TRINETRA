@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { FraudCaseListSchema, FraudCaseSnapshotSchema } from './case.js';
 import { DemoPaymentListSchema, DemoPaymentSnapshotSchema, DemoRunRequestSchema } from './demo.js';
 import { ApiErrorSchema } from './errors.js';
 import { PaymentIntentRequestSchema, RiskAssessmentSchema } from './payment-intent.js';
@@ -127,6 +128,26 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/demo/scenarios/refund-collect/run': {
+      post: {
+        summary: 'Run the fixed deceptive refund collect scenario in non-production demo mode',
+        'x-demo-only': true,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/DemoRunRequest' } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Blocked payment and evidence-backed fraud case',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
     '/v1/demo/payments': {
       get: {
         summary: 'List recent fixed-scenario demo payments for the operations console',
@@ -151,6 +172,35 @@ export const openApiDocument = {
             description: 'Synthetic demo payment timeline',
             content: {
               'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/demo/cases': {
+      get: {
+        summary: 'List durable synthetic fraud cases for the operations console',
+        'x-demo-only': true,
+        responses: {
+          '200': {
+            description: 'Recent evidence-backed synthetic cases',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/FraudCaseList' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/demo/cases/{caseId}': {
+      get: {
+        summary: 'Read one durable synthetic fraud case and its immutable timeline',
+        'x-demo-only': true,
+        parameters: [{ in: 'path', name: 'caseId', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Synthetic fraud case detail',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/FraudCaseSnapshot' } },
             },
           },
         },
@@ -182,6 +232,8 @@ export const openApiDocument = {
       DemoRunRequest: z.toJSONSchema(DemoRunRequestSchema),
       DemoPaymentSnapshot: z.toJSONSchema(DemoPaymentSnapshotSchema),
       DemoPaymentList: z.toJSONSchema(DemoPaymentListSchema),
+      FraudCaseSnapshot: z.toJSONSchema(FraudCaseSnapshotSchema),
+      FraudCaseList: z.toJSONSchema(FraudCaseListSchema),
       ApiError: z.toJSONSchema(ApiErrorSchema),
     },
   },

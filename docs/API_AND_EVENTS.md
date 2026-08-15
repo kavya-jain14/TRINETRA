@@ -41,18 +41,28 @@ receive a successful `DUPLICATE` acknowledgement.
 - `POST /v1/provider-events/trinetra-sandbox` verifies the provider signature, deduplicates the
   provider event, and applies only a legal monotonic transition.
 
+A `BLOCK` assessment opens or replays one tenant-scoped fraud case for the payment. `BLOCKED`
+payments cannot cross the provider-submission state boundary.
+
 ## Demo-only browser boundary
 
 `DEMO_MODE=true` registers a deliberately narrow synthetic interface:
 
 - `POST /v1/demo/scenarios/trusted-payment/run` runs only the fixed ₹249 trusted-merchant fixture.
+- `POST /v1/demo/scenarios/refund-collect/run` runs only the fixed deceptive refund collect fixture.
 - `GET /v1/demo/payments` returns recent durable demo snapshots for the operations console.
 - `GET /v1/demo/payments/{paymentId}` returns one immutable state/provider timeline.
+- `GET /v1/demo/cases` returns recent durable synthetic fraud cases and evidence.
+- `GET /v1/demo/cases/{caseId}` returns one immutable case timeline.
 
 These routes accept no payee, amount, provider scenario, tenant, or credential input. They are
 disabled by default and configuration validation rejects demo mode in production. Partner and
 provider APIs remain HMAC-authenticated; neither React bundle receives signing material. Local
 Vite servers proxy `/api` to the Fastify process so no permissive CORS policy is required.
+
+The demo case reads return only synthetic `pi_demo_*`/`case_demo_*` aggregates. Evidence references
+are bounded, tokenised categories such as `device:remote_access_active`; they never contain a raw
+VPA, cleartext receiver, credential, or secret.
 
 Health endpoints are separate:
 

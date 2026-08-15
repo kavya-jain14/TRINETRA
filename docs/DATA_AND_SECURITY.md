@@ -6,9 +6,12 @@
 - Production credentials must come from an approved secret manager. `.env` is local-only and ignored.
 - Logs redact signatures, partner keys, authorisation headers, secrets, raw VPAs, and PIN-shaped fields.
 - Tenant ID is part of every durable lookup and uniqueness boundary.
+- Fraud cases reference the tenant-scoped payment key; one payment can open at most one case, and
+  case identity cannot be rebound to another payment. Case evidence stores stable reason codes,
+  analyst definitions, and bounded references—not cleartext receiver identity or raw VPA data.
 - Graph queries are tenant-, hop-, time-, and node-bounded.
 - Default degradation is visible step-up/block according to policy, never silent allow.
 - Unknown/pending provider outcomes are status-checked before any controlled retry.
-- Payment state, audit, and outbox events are append-only to the application role in the production design.
+- Payment state, case, audit, and outbox events are append-only to the application role in the production design.
 
 This hackathon repository demonstrates production-shaped boundaries but is not a certified payment system and does not process real money.

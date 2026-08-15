@@ -3,16 +3,56 @@
   place-items: center;
 }
 
-.consumer-shell > .eyebrow {
+.consumer-header {
   position: fixed;
   top: 1.5rem;
   left: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.scenario-switch {
+  display: flex;
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.scenario-switch button {
+  padding: 0.55rem 0.8rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.scenario-switch button.is-active {
+  background: color-mix(in srgb, var(--safe) 12%, transparent);
+  color: var(--text);
+}
+
+.scenario-switch button.risk-option.is-active {
+  background: color-mix(in srgb, var(--risk) 12%, transparent);
 }
 
 .payment-card {
   width: min(100%, 480px);
   padding: clamp(1.5rem, 5vw, 3rem);
   text-align: center;
+}
+
+.payment-card.risk-flow {
+  border-color: color-mix(in srgb, var(--risk), var(--line) 48%);
+}
+
+.risk-flow .merchant-mark {
+  background: color-mix(in srgb, var(--risk) 8%, var(--surface));
 }
 
 .merchant-mark {
@@ -66,7 +106,7 @@
   text-align: right;
 }
 
-.payment-card button {
+.payment-card .primary-action {
   width: 100%;
   padding: 1rem;
   border: 0;
@@ -76,11 +116,16 @@
   font-weight: 800;
 }
 
-.payment-card button:not(:disabled) {
+.payment-card .primary-action.risk-action {
+  background: var(--risk);
+  color: #1c0508;
+}
+
+.payment-card .primary-action:not(:disabled) {
   cursor: pointer;
 }
 
-.payment-card button:disabled {
+.payment-card .primary-action:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -104,6 +149,43 @@
   margin-bottom: 0.9rem;
   color: var(--safe);
   font-weight: 800;
+}
+
+.payment-result.is-blocked {
+  border-color: color-mix(in srgb, var(--risk), var(--line) 45%);
+  background: color-mix(in srgb, var(--risk) 7%, var(--surface));
+}
+
+.payment-result.is-blocked .result-state {
+  color: var(--risk);
+}
+
+.payment-result.is-blocked .status-dot {
+  background: var(--risk);
+  box-shadow: 0 0 16px var(--risk);
+}
+
+.safety-explanation {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  line-height: 1.5;
+}
+
+.safety-explanation > strong {
+  color: var(--text);
+}
+
+.safety-explanation ul {
+  margin: 0.7rem 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+}
+
+.safety-explanation p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
 }
 
 .result-grid {
@@ -138,6 +220,22 @@
 }
 
 @media (max-width: 480px) {
+  .consumer-shell {
+    padding-top: 7.5rem;
+  }
+
+  .consumer-header {
+    display: block;
+  }
+
+  .scenario-switch {
+    margin-top: 0.8rem;
+  }
+
+  .scenario-switch button {
+    flex: 1;
+  }
+
   .result-grid {
     grid-template-columns: 1fr;
   }

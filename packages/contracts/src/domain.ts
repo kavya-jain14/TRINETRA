@@ -43,6 +43,18 @@ export const RiskReasonCodeSchema = z.enum([
 ]);
 export type RiskReasonCode = z.infer<typeof RiskReasonCodeSchema>;
 
+export const CASE_STATUSES = ['OPEN', 'IN_REVIEW', 'ESCALATED', 'RESOLVED'] as const;
+export const CaseStatusSchema = z.enum(CASE_STATUSES);
+export type CaseStatus = z.infer<typeof CaseStatusSchema>;
+
+export const CASE_SEVERITIES = ['MEDIUM', 'HIGH', 'CRITICAL'] as const;
+export const CaseSeveritySchema = z.enum(CASE_SEVERITIES);
+export type CaseSeverity = z.infer<typeof CaseSeveritySchema>;
+
+export const CASE_CATEGORIES = ['SOCIAL_ENGINEERING', 'RISK_REVIEW'] as const;
+export const CaseCategorySchema = z.enum(CASE_CATEGORIES);
+export type CaseCategory = z.infer<typeof CaseCategorySchema>;
+
 export const DomainEventTypeSchema = z.enum([
   'payment_intent.created',
   'risk_assessment.completed',

@@ -1,4 +1,11 @@
-import { PAYMENT_STATES, PROVIDER_PAYMENT_STATUSES, RISK_DECISIONS } from '@trinetra/contracts';
+import {
+  CASE_CATEGORIES,
+  CASE_SEVERITIES,
+  CASE_STATUSES,
+  PAYMENT_STATES,
+  PROVIDER_PAYMENT_STATUSES,
+  RISK_DECISIONS,
+} from '@trinetra/contracts';
 import {
   boolean,
   foreignKey,
@@ -29,6 +36,9 @@ export const providerAttemptStatusEnum = pgEnum('provider_attempt_status', [
   'COMPLETED',
   'UNKNOWN',
 ]);
+export const caseStatusEnum = pgEnum('case_status', CASE_STATUSES);
+export const caseSeverityEnum = pgEnum('case_severity', CASE_SEVERITIES);
+export const caseCategoryEnum = pgEnum('case_category', CASE_CATEGORIES);
 
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -272,5 +282,66 @@ export const paymentRecoveryClocks = pgTable(
     }),
     index('payment_recovery_clocks_status_due_idx').on(table.statusCheckDueAt),
     index('payment_recovery_clocks_reversal_due_idx').on(table.reversalDueAt),
+  ],
+);
+
+export const fraudCases = pgTable(
+  'cases',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    externalRef: text('external_ref').notNull(),
+    paymentIntentId: uuid('payment_intent_id').notNull(),
+    status: caseStatusEnum('status').notNull().default('OPEN'),
+    severity: caseSeverityEnum('severity').notNull(),
+    category: caseCategoryEnum('category').notNull(),
+    summary: text('summary').notNull(),
+    evidence: jsonb('evidence').notNull(),
+    resourceVersion: integer('resource_version').notNull().default(1),
+    openedAt: timestamp('opened_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.tenantId, table.paymentIntentId],
+      foreignColumns: [paymentIntents.tenantId, paymentIntents.id],
+      name: 'cases_tenant_payment_fk',
+    }),
+    uniqueIndex('cases_tenant_external_ref_unique').on(table.tenantId, table.externalRef),
+    uniqueIndex('cases_tenant_payment_unique').on(table.tenantId, table.paymentIntentId),
+    uniqueIndex('cases_tenant_internal_id_unique').on(table.tenantId, table.id),
+    index('cases_tenant_status_opened_idx').on(table.tenantId, table.status, table.openedAt),
+  ],
+);
+
+export const caseEvents = pgTable(
+  'case_events',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    caseId: uuid('case_id').notNull(),
+    eventKey: text('event_key').notNull(),
+    eventType: text('event_type').notNull(),
+    source: text('source').notNull(),
+    payload: jsonb('payload').notNull().default({}),
+    resourceVersion: integer('resource_version').notNull(),
+    occurredAt: timestamp('occurred_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    foreignKey({
+      columns: [table.tenantId, table.caseId],
+      foreignColumns: [fraudCases.tenantId, fraudCases.id],
+      name: 'case_events_tenant_case_fk',
+    }),
+    uniqueIndex('case_events_tenant_event_key_unique').on(
+      table.tenantId,
+      table.caseId,
+      table.eventKey,
+    ),
+    index('case_events_case_time_idx').on(table.tenantId, table.caseId, table.occurredAt),
   ],
 );

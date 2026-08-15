@@ -10,12 +10,14 @@ export interface EvaluationContext {
   paymentIntentId: string;
   traceId: string;
   deviceTrust: 'TRUSTED' | 'UNKNOWN';
+  beneficiaryTrust?: 'KNOWN' | 'NEW';
 }
 
 type EvaluationResult = Omit<RiskAssessment, 'resource_version'> & { resource_version: 1 };
 
 const userMessages = {
   UNKNOWN_DEVICE: 'This device has not been seen on this profile before.',
+  NEW_BENEFICIARY: 'You have not paid this receiver before.',
   AMOUNT_ABOVE_USER_P99: 'This amount is much higher than the configured demo baseline.',
   REFUND_COLLECT_CONFLICT: 'A collect request sends money; it does not receive a refund.',
   PAYEE_MERCHANT_MISMATCH: 'The receiver does not match the selected merchant.',
@@ -55,6 +57,15 @@ export function evaluatePaymentIntent(
 
   if (identity >= 40) {
     reasons.push({ code: 'UNKNOWN_DEVICE', impact: 28, user_message: userMessages.UNKNOWN_DEVICE });
+  }
+
+  if (context.beneficiaryTrust === 'NEW') {
+    intent = Math.max(intent, 66);
+    reasons.push({
+      code: 'NEW_BENEFICIARY',
+      impact: 32,
+      user_message: userMessages.NEW_BENEFICIARY,
+    });
   }
 
   if (input.amount_paise > 500_000) {
