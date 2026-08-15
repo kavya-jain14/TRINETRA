@@ -12,6 +12,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@trinetra/case-core": "workspace:*",
     "@trinetra/config": "workspace:*",
     "@trinetra/contracts": "workspace:*",
     "@trinetra/database": "workspace:*",

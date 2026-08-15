@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 
 import type { FastifyInstance } from 'fastify';
 
+import type { CaseService } from '@trinetra/case-core';
 import {
   PaymentIntentRequestSchema,
   RiskAssessmentSchema,
@@ -18,6 +19,7 @@ import { authenticatePartnerRequest, type PartnerAuthConfig } from '../auth.js';
 
 export interface PaymentIntentRouteConfig extends PartnerAuthConfig {
   ledgerService: PaymentLedgerService;
+  caseService: CaseService;
   tenantId: string;
   isTrustedDeviceToken: (deviceToken: string) => boolean;
 }
@@ -106,6 +108,7 @@ export async function registerPaymentIntentRoutes(
     }
 
     const response = RiskAssessmentSchema.parse(result.responseBody);
+    await config.caseService.ensureBlockedPaymentCase(config.tenantId, result.payment.id, response);
 
     reply.header('x-trace-id', response.trace_id);
     reply.header('x-resource-version', response.resource_version);

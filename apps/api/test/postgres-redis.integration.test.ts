@@ -3,7 +3,12 @@ import { randomUUID } from 'node:crypto';
 import { Redis } from 'ioredis';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { createDatabase, ensureTenant, PostgresPaymentLedgerRepository } from '@trinetra/database';
+import {
+  createDatabase,
+  ensureTenant,
+  PostgresCaseRepository,
+  PostgresPaymentLedgerRepository,
+} from '@trinetra/database';
 import { canonicalJson, RedisNonceStore, signPartnerRequest } from '@trinetra/security';
 
 import { buildApp } from '../src/app.js';
@@ -20,6 +25,7 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
   let redisPrimary: Redis;
   let redisReplica: Redis;
   let repository: PostgresPaymentLedgerRepository;
+  let caseRepository: PostgresCaseRepository;
   const apps: Awaited<ReturnType<typeof buildApp>>[] = [];
 
   const intent = {
@@ -69,6 +75,7 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
     redisPrimary = new Redis(redisUrl!, { maxRetriesPerRequest: 1 });
     redisReplica = new Redis(redisUrl!, { maxRetriesPerRequest: 1 });
     repository = new PostgresPaymentLedgerRepository(pool);
+    caseRepository = new PostgresCaseRepository(pool);
 
     await ensureTenant(pool, {
       id: tenantId,
@@ -81,6 +88,7 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
       partnerSecret,
       now: () => fixedNow,
       ledgerRepository: repository,
+      caseRepository,
       tenantId,
       trustedDeviceTokens: ['dev_tok_integration_trusted'],
       demoMode: true,
@@ -173,6 +181,42 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
       'ALLOWED',
       'SUBMITTED',
       'SUCCEEDED',
+    ]);
+  });
+
+  it('persists a blocked refund case and its evidence across API replicas', async () => {
+    const primary = apps[0]!;
+    const replica = apps[1]!;
+    const runId = `run_${randomUUID().replaceAll('-', '')}`;
+
+    const blocked = await primary.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/refund-collect/run',
+      payload: { run_id: runId },
+    });
+    expect(blocked.statusCode).toBe(201);
+    expect(blocked.json()).toMatchObject({
+      assessment: { decision: 'BLOCK' },
+      payment: { state: 'BLOCKED', provider_request_ref: null },
+      provider_attempts: [],
+      fraud_case: { status: 'OPEN', severity: 'CRITICAL' },
+    });
+
+    const listed = await replica.inject({ method: 'GET', url: '/v1/demo/cases?limit=20' });
+    expect(listed.statusCode).toBe(200);
+    const persisted = listed
+      .json()
+      .cases.find(
+        (fraudCase: { case_id: string }) => fraudCase.case_id === blocked.json().fraud_case.case_id,
+      );
+    if (!persisted) throw new Error('Refund fraud case was not visible on the second replica.');
+    expect(persisted.evidence.map((item: { code: string }) => item.code)).toEqual([
+      'REMOTE_ACCESS_ACTIVE',
+      'REFUND_COLLECT_CONFLICT',
+      'NEW_BENEFICIARY',
+    ]);
+    expect(persisted.timeline).toEqual([
+      expect.objectContaining({ event_type: 'case.created', resource_version: 1 }),
     ]);
   });
 });

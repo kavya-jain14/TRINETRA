@@ -1,5 +1,6 @@
 import { z } from 'zod';
 
+import { FraudCaseSnapshotSchema } from './case.js';
 import { PaymentStateSchema } from './domain.js';
 import { RiskAssessmentSchema } from './payment-intent.js';
 import { PaymentResourceSchema, ProviderPaymentStatusSchema } from './payment-ledger.js';
@@ -11,12 +12,24 @@ export const DemoRunRequestSchema = z
   .strict();
 export type DemoRunRequest = z.infer<typeof DemoRunRequestSchema>;
 
-export const DemoScenarioSchema = z.object({
-  key: z.literal('trusted-payment'),
-  label: z.literal('Trusted everyday payment'),
-  merchant_name: z.literal('Aarav Electronics'),
-  amount_paise: z.literal(24_900),
-});
+export const DemoScenarioSchema = z.discriminatedUnion('key', [
+  z.object({
+    key: z.literal('trusted-payment'),
+    label: z.literal('Trusted everyday payment'),
+    counterparty_name: z.literal('Aarav Electronics'),
+    amount_paise: z.literal(24_900),
+    direction: z.literal('PUSH'),
+    claimed_goal: z.literal('PAY_MERCHANT'),
+  }),
+  z.object({
+    key: z.literal('refund-collect'),
+    label: z.literal('Deceptive refund collect request'),
+    counterparty_name: z.literal('Synthetic Refund Desk'),
+    amount_paise: z.literal(199_900),
+    direction: z.literal('COLLECT'),
+    claimed_goal: z.literal('RECEIVE_REFUND'),
+  }),
+]);
 export type DemoScenario = z.infer<typeof DemoScenarioSchema>;
 
 export const PaymentTimelineEventSchema = z.object({
@@ -47,6 +60,7 @@ export const DemoPaymentSnapshotSchema = z.object({
   payment: PaymentResourceSchema,
   timeline: z.array(PaymentTimelineEventSchema),
   provider_attempts: z.array(ProviderAttemptSummarySchema),
+  fraud_case: FraudCaseSnapshotSchema.nullable(),
 });
 export type DemoPaymentSnapshot = z.infer<typeof DemoPaymentSnapshotSchema>;
 

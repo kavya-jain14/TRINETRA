@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DemoPaymentSnapshotSchema,
   DemoRunRequestSchema,
+  FraudCaseSnapshotSchema,
   PartnerWebhookEnvelopeSchema,
   PaymentIntentRequestSchema,
   PaymentSubmissionRequestSchema,
@@ -92,10 +93,48 @@ describe('payment intent contracts', () => {
         scenario: {
           key: 'trusted-payment',
           label: 'Trusted everyday payment',
-          merchant_name: 'Aarav Electronics',
+          counterparty_name: 'Aarav Electronics',
           amount_paise: 24_900,
+          direction: 'PUSH',
+          claimed_goal: 'PAY_MERCHANT',
         },
       }).success,
     ).toBe(false);
+  });
+
+  it('publishes an evidence-backed fraud case contract', () => {
+    const parsed = FraudCaseSnapshotSchema.safeParse({
+      case_id: 'case_demo_refund',
+      payment_intent_id: 'pi_demo_refund',
+      status: 'OPEN',
+      severity: 'CRITICAL',
+      category: 'SOCIAL_ENGINEERING',
+      summary: 'Deceptive refund collect request blocked before provider submission.',
+      evidence: [
+        {
+          code: 'REFUND_COLLECT_CONFLICT',
+          lens: 'INTENT',
+          impact: 72,
+          user_message: 'A collect request sends money; it does not receive a refund.',
+          analyst_detail: 'Declared receive-refund goal conflicts with a debit collect request.',
+          evidence_ref: 'payment_context:refund_collect_conflict',
+        },
+      ],
+      timeline: [
+        {
+          event_id: 'ce_demo_refund',
+          event_type: 'case.created',
+          source: 'RISK_ENGINE',
+          payload: { status: 'OPEN' },
+          resource_version: 1,
+          occurred_at: '2026-08-15T12:00:00.000Z',
+        },
+      ],
+      resource_version: 1,
+      opened_at: '2026-08-15T12:00:00.000Z',
+      updated_at: '2026-08-15T12:00:00.000Z',
+    });
+
+    expect(parsed.success).toBe(true);
   });
 });

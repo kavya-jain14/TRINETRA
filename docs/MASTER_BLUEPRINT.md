@@ -1882,6 +1882,10 @@ Do not start graph animation, ML, or pitch polish before this works.
 
 > Deceptive refund collect request → intent conflict + new beneficiary reasons → `BLOCK` → no provider submission → case opens → analyst sees evidence.
 
+Implementation status: the fixed synthetic flow is wired end to end. `cases`, `case_events`, and
+the `case.created` outbox record are durable and tenant-scoped; the consumer renders safe-action
+copy, and the operations console reads the live evidence and immutable timelines.
+
 ### Third checkpoint
 
 > Provider timeout → `PENDING` → repeated request returns original payment → worker status check → late `SUCCEEDED` or `REVERSED` on the same timeline.

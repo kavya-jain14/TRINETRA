@@ -1,10 +1,15 @@
-import { DemoPaymentSnapshotSchema, type DemoPaymentSnapshot } from '@trinetra/contracts';
+import {
+  DemoPaymentSnapshotSchema,
+  type DemoPaymentSnapshot,
+  type DemoScenario,
+} from '@trinetra/contracts';
 
-export async function runTrustedPayment(
+export async function runDemoScenario(
+  scenario: DemoScenario['key'],
   runId: string,
   signal?: AbortSignal,
 ): Promise<DemoPaymentSnapshot> {
-  const response = await fetch('/api/v1/demo/scenarios/trusted-payment/run', {
+  const response = await fetch(`/api/v1/demo/scenarios/${scenario}/run`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ run_id: runId }),

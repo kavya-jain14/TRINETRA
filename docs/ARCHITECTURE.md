@@ -8,7 +8,7 @@ TRINETRA is a TypeScript modular monolith with separate deployable processes for
 partner boundary
   -> Fastify API
       -> contracts
-      -> risk-core / graph-core / payment-core
+      -> risk-core / graph-core / payment-core / case-core
       -> PostgreSQL transaction + outbox
   -> BullMQ workers through Redis
       -> recovery, reconciliation, signed webhooks
@@ -37,14 +37,22 @@ retry instruction. `packages/database` implements the port with row locks, optim
 versions, append-only state/provider events, tenant-scoped keys, and a transactional outbox.
 Provider callbacks are signed and idempotent; old callbacks cannot move a payment backward.
 
+## Fraud case boundary
+
+`packages/case-core` converts a `BLOCK` assessment into one idempotent, evidence-backed case. The
+PostgreSQL adapter resolves the payment inside the tenant boundary and commits `cases`,
+`case_events`, and `case.created` outbox rows in one transaction. Case evidence is derived from the
+published assessment reasons through a fixed reason-to-lens definition; route handlers and React
+code do not invent analyst meaning. The in-memory case repository exists only for isolated tests.
+
 ## Golden-flow demo boundary
 
 The consumer and operations applications never hold a partner HMAC secret. In explicit local demo
-mode, Fastify exposes a fixed synthetic scenario command and read-only durable timeline views. The
-command accepts only an opaque run ID, uses the same risk and payment services as partner routes,
-and cannot select arbitrary amounts, payees, tenants, or provider behaviours. Production
-configuration rejects demo mode. The operations console polls PostgreSQL-backed snapshots, so a
-refresh or another API replica observes the same payment state.
+mode, Fastify exposes two fixed synthetic scenario commands and read-only durable timeline views.
+Each command accepts only an opaque run ID, uses the same risk, payment, and case services as
+partner routes, and cannot select arbitrary amounts, payees, tenants, or provider behaviours.
+Production configuration rejects demo mode. The operations console polls PostgreSQL-backed
+snapshots, so a refresh or another API replica observes the same payment and case state.
 
 ## Module boundary rule
 

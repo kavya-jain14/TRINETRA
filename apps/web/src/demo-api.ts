@@ -1,10 +1,31 @@
-import { DemoPaymentListSchema, type DemoPaymentSnapshot } from '@trinetra/contracts';
+import {
+  DemoPaymentListSchema,
+  FraudCaseListSchema,
+  type DemoPaymentSnapshot,
+  type FraudCaseSnapshot,
+} from '@trinetra/contracts';
 
-export async function listDemoPayments(signal?: AbortSignal): Promise<DemoPaymentSnapshot[]> {
-  const response = await fetch('/api/v1/demo/payments?limit=8', {
+export interface DemoOperationsSnapshot {
+  payments: DemoPaymentSnapshot[];
+  cases: FraudCaseSnapshot[];
+}
+
+export async function loadDemoOperations(signal?: AbortSignal): Promise<DemoOperationsSnapshot> {
+  const options = {
     headers: { accept: 'application/json' },
     ...(signal ? { signal } : {}),
-  });
-  if (!response.ok) throw new Error(`TRINETRA timeline request failed (${response.status}).`);
-  return DemoPaymentListSchema.parse(await response.json()).payments;
+  };
+  const [paymentsResponse, casesResponse] = await Promise.all([
+    fetch('/api/v1/demo/payments?limit=12', options),
+    fetch('/api/v1/demo/cases?limit=12', options),
+  ]);
+  if (!paymentsResponse.ok || !casesResponse.ok) {
+    throw new Error(
+      `TRINETRA operations request failed (${paymentsResponse.status}/${casesResponse.status}).`,
+    );
+  }
+  return {
+    payments: DemoPaymentListSchema.parse(await paymentsResponse.json()).payments,
+    cases: FraudCaseListSchema.parse(await casesResponse.json()).cases,
+  };
 }
