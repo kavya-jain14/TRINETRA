@@ -128,7 +128,7 @@ export class PostgresCaseRepository implements CaseRepository {
           input.severity,
           input.category,
           input.summary,
-          input.evidence,
+          JSON.stringify(input.evidence),
           input.now,
         ],
       );
