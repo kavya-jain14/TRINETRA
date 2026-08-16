@@ -63,6 +63,17 @@ const journey = {
       ['Recovery rule', 'Track original reference to reversal'],
     ],
   },
+  'mule-network': {
+    eyebrow: 'Bounded network-risk check',
+    counterparty: 'Orchid Supplies Demo',
+    amount: '₹649',
+    mark: 'OS',
+    facts: [
+      ['Destination', 'New synthetic beneficiary'],
+      ['Graph bound', 'Maximum two hops · 90-day window'],
+      ['Safety rule', 'Association is a signal—not proof'],
+    ],
+  },
 } as const;
 
 export function App() {
@@ -80,6 +91,7 @@ export function App() {
   const reversalPending = snapshot?.payment.state === 'REVERSAL_PENDING';
   const timeoutFlow = scenario === 'timeout-recovery';
   const reversalFlow = scenario === 'reversal-recovery';
+  const graphFlow = scenario === 'mule-network';
   const recoveryFlow = timeoutFlow || reversalFlow;
   const recoverable = pending || reversalPending;
 
@@ -161,12 +173,19 @@ export function App() {
           >
             Reversal watch
           </button>
+          <button
+            type="button"
+            className={scenario === 'mule-network' ? 'is-active risk-option' : 'risk-option'}
+            onClick={() => reset('mule-network')}
+          >
+            Network risk
+          </button>
         </div>
       </div>
 
       <section
         className={
-          scenario === 'refund-collect'
+          scenario === 'refund-collect' || graphFlow
             ? 'panel payment-card risk-flow'
             : recoveryFlow
               ? 'panel payment-card pending-flow'
@@ -204,7 +223,9 @@ export function App() {
             <div className="result-state">
               <span className="status-dot" aria-hidden="true" />
               {blocked
-                ? 'Payment blocked before submission'
+                ? graphFlow
+                  ? 'Payment blocked by bounded graph evidence'
+                  : 'Payment blocked before submission'
                 : reversalPending
                   ? 'Reversal monitoring active · do not pay again'
                   : pending
@@ -230,15 +251,20 @@ export function App() {
             </div>
             {blocked ? (
               <div className="safety-explanation">
-                <strong>This request would send money—not receive a refund.</strong>
+                <strong>
+                  {graphFlow
+                    ? 'This destination is two hops from confirmed synthetic fraud cases.'
+                    : 'This request would send money—not receive a refund.'}
+                </strong>
                 <ul>
                   {snapshot.assessment.reasons.map((reason) => (
                     <li key={reason.code}>{reason.user_message}</li>
                   ))}
                 </ul>
                 <p>
-                  Safe action: close the request and contact the organisation through its official
-                  channel. No provider submission was made.
+                  {graphFlow
+                    ? `Bounded evidence: ${snapshot.graph?.linked_confirmed_cases ?? 0} confirmed cases · ${snapshot.graph?.nodes.length ?? 0} nodes inspected. Association is a review signal, not proof of guilt. No provider submission was made.`
+                    : 'Safe action: close the request and contact the organisation through its official channel. No provider submission was made.'}
                 </p>
               </div>
             ) : null}
@@ -294,7 +320,7 @@ export function App() {
         <button
           type="button"
           className={
-            scenario === 'refund-collect'
+            scenario === 'refund-collect' || graphFlow
               ? 'primary-action risk-action'
               : recoveryFlow
                 ? 'primary-action pending-action'
@@ -315,9 +341,11 @@ export function App() {
                   ? 'Retry safely'
                   : scenario === 'refund-collect'
                     ? 'Inspect refund request'
-                    : recoveryFlow
-                      ? 'Submit once securely'
-                      : 'Continue securely'}
+                    : graphFlow
+                      ? 'Inspect network risk'
+                      : recoveryFlow
+                        ? 'Submit once securely'
+                        : 'Continue securely'}
         </button>
         {(timeoutFlow ? pending && replayConfirmed : reversalFlow && recoverable) ? (
           <button

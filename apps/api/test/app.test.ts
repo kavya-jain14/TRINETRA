@@ -754,6 +754,84 @@ describe('TRINETRA partner API foundation', () => {
     await app.close();
   });
 
+  it('blocks a two-hop graph-linked destination with explainable bounded evidence', async () => {
+    const repository = new InMemoryPaymentLedgerRepository();
+    const caseRepository = new InMemoryCaseRepository();
+    const provider = new DeterministicPaymentProviderAdapter();
+    let currentNow = fixedNow;
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => currentNow,
+      ledgerRepository: repository,
+      caseRepository,
+      paymentProvider: provider,
+      demoMode: true,
+    });
+    const payload = { run_id: 'run_graph001' };
+
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/mule-network/run',
+      payload,
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/mule-network/run',
+      payload,
+    });
+
+    expect(blocked.statusCode).toBe(201);
+    expect(blocked.json()).toMatchObject({
+      scenario: { key: 'mule-network', amount_paise: 64_900 },
+      assessment: {
+        decision: 'BLOCK',
+        risk_score: 92,
+        subscores: { identity: 8, intent: 6, integrity: 92 },
+        reasons: [{ code: 'GRAPH_LINKED_DESTINATION', impact: 75 }],
+      },
+      payment: { state: 'BLOCKED', provider_request_ref: null },
+      provider_attempts: [],
+      graph: {
+        linked_confirmed_cases: 2,
+        minimum_hops: 2,
+        risk_contribution: 75,
+        max_hops: 2,
+        truncated: false,
+      },
+      fraud_case: {
+        status: 'OPEN',
+        severity: 'HIGH',
+        category: 'RISK_REVIEW',
+        summary: 'Graph-linked destination blocked for bounded analyst review.',
+        evidence: [{ code: 'GRAPH_LINKED_DESTINATION', lens: 'INTEGRITY' }],
+      },
+    });
+    expect(blocked.json().graph.nodes).toHaveLength(6);
+    expect(blocked.json().graph.edges).toHaveLength(5);
+    expect(blocked.json().timeline.at(-1).evidence.graph).toMatchObject({
+      destination_ref: 'vpa_tok_graph_destination_47',
+      linked_confirmed_cases: 2,
+      minimum_hops: 2,
+    });
+    expect(blocked.json().timeline.map((event: { to_state: string }) => event.to_state)).toEqual([
+      'CREATED',
+      'RISK_EVALUATING',
+      'BLOCKED',
+    ]);
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().payment.payment_intent_id).toBe(blocked.json().payment.payment_intent_id);
+    expect(replay.json().fraud_case.case_id).toBe(blocked.json().fraud_case.case_id);
+    currentNow = new Date('2026-11-15T12:00:00.000Z');
+    const historical = await app.inject({
+      method: 'GET',
+      url: `/v1/demo/payments/${blocked.json().payment.payment_intent_id}`,
+    });
+    expect(historical.json().graph).toEqual(blocked.json().graph);
+    expect(provider.submissionCount).toBe(0);
+    await app.close();
+  });
+
   it('rejects malformed demo identifiers and hides non-demo payments from demo reads', async () => {
     const app = await buildApp({
       partnerKey: 'partner_demo',

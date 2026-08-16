@@ -57,4 +57,22 @@ REVERSAL_PENDING → REVERSED`, with the original provider reference and resolve
 7. State the boundary accurately: the partner bank or PSP executes the actual reversal under the
    applicable timeline; TRINETRA monitors it and the prototype clock is accelerated.
 
+## Bounded graph-risk checkpoint
+
+1. Select **Network risk** and inspect the fixed ₹649 Orchid Supplies Demo payment.
+2. Confirm the destination is a tokenised reference; no raw VPA appears in the browser or analyst
+   evidence.
+3. Run the scenario and confirm NETRA-III is 92, graph contribution is 75, decision is `BLOCK`, and
+   the payment timeline is `CREATED → RISK_EVALUATING → BLOCKED`.
+4. Confirm there is no provider reference and zero provider attempts.
+5. In operations, confirm six nodes and five edges: destination → shared-device cluster → two
+   confirmed synthetic cases, with two additional synthetic customers linked to the cluster.
+6. Confirm the topology states two hops, at most 250 nodes, a 90-day evidence window, and no
+   truncation for this fixture.
+7. Open the `HIGH / RISK_REVIEW` case and confirm `GRAPH_LINKED_DESTINATION` appears as NETRA-III
+   evidence.
+8. Repeat the same run ID and confirm the payment and case IDs are unchanged and the provider
+   submission count remains zero.
+9. State the boundary accurately: association is a bounded review signal, not proof of guilt.
+
 Never imply that the demo accesses NPCI, a bank, a real UPI account, or a UPI PIN.

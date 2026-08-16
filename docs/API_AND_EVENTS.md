@@ -57,6 +57,8 @@ payments cannot cross the provider-submission state boundary.
   merchant-confirmation-missing fixture once.
 - `POST /v1/demo/scenarios/reversal-recovery/recover` advances one status-first pulse from
   `PENDING` to `REVERSAL_PENDING`, then to `REVERSED`; terminal calls are read-only replays.
+- `POST /v1/demo/scenarios/mule-network/run` evaluates the fixed ₹649 tokenised destination against
+  a tenant-scoped two-hop synthetic graph, blocks before submission, and opens one analyst case.
 - `GET /v1/demo/payments` returns recent durable demo snapshots for the operations console.
 - `GET /v1/demo/payments/{paymentId}` returns one immutable state/provider timeline.
 - `GET /v1/demo/cases` returns recent durable synthetic fraud cases and evidence.
@@ -75,6 +77,11 @@ real-world timeline.
 The demo case reads return only synthetic `pi_demo_*`/`case_demo_*` aggregates. Evidence references
 are bounded, tokenised categories such as `device:remote_access_active`; they never contain a raw
 VPA, cleartext receiver, credential, or secret.
+
+Graph snapshots expose at most 250 nodes and 500 edges, plus the two-hop limit, truncation flag,
+confirmed synthetic case count, minimum distance, and capped risk contribution. Node and edge
+references are fixed synthetic tokens. Consumers must present graph association as a review signal,
+not proof of guilt.
 
 Health endpoints are separate:
 

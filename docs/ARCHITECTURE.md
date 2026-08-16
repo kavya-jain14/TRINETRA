@@ -30,6 +30,13 @@ keep status polling on the original provider reference until a terminal reversal
 
 The deterministic engine produces all three integer scores, an ordered reason list, a rule-set version, an expiry, and one final `ALLOW`, `WARN`, `STEP_UP`, or `BLOCK` decision.
 
+Graph enrichment goes through `graph-core` and a repository port. The production adapter executes a
+tenant-scoped PostgreSQL recursive query over no more than two hops, 250 returned nodes, 500 eligible
+edges, and a 90-day evidence window. Expired nodes or edges cannot participate in traversal. The
+current graph contribution is capped at 75 and remains explicit evidence; identifier text never
+creates graph risk by itself. The exact decision-time topology is copied into the append-only risk
+decision event so subsequent graph expiry cannot rewrite historical evidence.
+
 ## Payment safety
 
 State transitions originate in `packages/payment-core`. `PENDING` is an unresolved state, not a
@@ -48,7 +55,7 @@ code do not invent analyst meaning. The in-memory case repository exists only fo
 ## Golden-flow demo boundary
 
 The consumer and operations applications never hold a partner HMAC secret. In explicit local demo
-mode, Fastify exposes four fixed synthetic scenario commands, two bounded recovery-lab actions,
+mode, Fastify exposes five fixed synthetic scenario commands, two bounded recovery-lab actions,
 and read-only durable timeline views.
 Each command accepts only an opaque run ID, uses the same risk, payment, and case services as
 partner routes, and cannot select arbitrary amounts, payees, tenants, or provider behaviours.
@@ -61,6 +68,10 @@ The reversal lab uses state-specific inquiry keys: one pulse may advance `PENDIN
 `REVERSAL_PENDING`, and a distinct next-state pulse may advance it to `REVERSED`. A terminal call
 does not contact the provider. The UI labels the short prototype deadlines as accelerated policy
 clocks; actual reversal execution and regulatory timing remain outside TRINETRA's boundary.
+
+The graph-risk lab seeds only fixed tokenised synthetic references. It blocks the fixture before the
+provider boundary, opens an evidence-backed analyst case, and publishes the exact bounded topology
+used by the decision. The topology is an investigation signal, not an allegation or proof of guilt.
 
 ## Module boundary rule
 

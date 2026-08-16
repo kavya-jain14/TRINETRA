@@ -5,6 +5,7 @@ import {
   ensureTenant,
   PostgresCaseRepository,
   PostgresDeterministicPaymentProviderAdapter,
+  PostgresGraphRepository,
   PostgresPaymentLedgerRepository,
 } from '@trinetra/database';
 import { RedisNonceStore } from '@trinetra/security';
@@ -25,6 +26,7 @@ const app = await buildApp({
   logLevel: env.LOG_LEVEL,
   ledgerRepository: new PostgresPaymentLedgerRepository(pool),
   caseRepository: new PostgresCaseRepository(pool),
+  graphRepository: new PostgresGraphRepository(pool),
   paymentProvider: new PostgresDeterministicPaymentProviderAdapter(pool),
   nonceStore: new RedisNonceStore(redis),
   tenantId: env.DEMO_TENANT_ID,

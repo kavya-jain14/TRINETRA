@@ -28,6 +28,7 @@ export interface CreateRiskEvaluatedPaymentInput {
   amountPaise: number;
   currency: 'INR';
   decision: RiskDecision;
+  decisionEvidence?: Readonly<Record<string, unknown>>;
 }
 
 export interface PaymentLedgerServiceConfig {
@@ -81,7 +82,7 @@ export class PaymentLedgerService {
       toState: stateForDecision(input.decision),
       eventKey: `${input.paymentId}:risk-decision:${input.decision}`,
       source: 'RISK_ENGINE',
-      evidence: { decision: input.decision },
+      evidence: { ...input.decisionEvidence, decision: input.decision },
       now,
     });
     return { ...created, payment };

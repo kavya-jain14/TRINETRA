@@ -104,3 +104,15 @@ The consumer explicitly says not to pay again, while operations shows one submis
 inquiries, the durable policy-clock evidence, and the complete monotonic timeline. Real regulatory
 timing and reversal execution remain the responsibility of the partner bank or PSP; the prototype
 only visualizes and monitors them. PostgreSQL/Redis CI proves the two-pulse flow across API replicas.
+
+## Fifth integration checkpoint
+
+Consumer demo evaluates one fixed synthetic ₹649 payment to Orchid Supplies Demo → the tokenised
+destination resolves through one shared-device cluster to two confirmed synthetic fraud cases at
+exactly two hops → NETRA-III rises to 92 and the decision is `BLOCK` → no provider submission is
+created → one durable `HIGH / RISK_REVIEW` case opens with explainable graph evidence.
+
+The graph is tenant-scoped and capped at two hops, 250 nodes, 500 edges, and a 90-day evidence
+window. PostgreSQL stores the durable nodes and relationships; the operations console renders the
+bounded topology and clearly states that association is a risk signal, not proof of guilt. See
+[Package 1B graph risk](docs/GRAPH_RISK_1B.md) for the implementation boundary.

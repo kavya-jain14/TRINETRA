@@ -16,4 +16,21 @@ describe('database migrations', () => {
     expect(uniqueKey).toBeGreaterThanOrEqual(0);
     expect(foreignKey).toBeGreaterThan(uniqueKey);
   });
+
+  it('creates tenant-scoped graph keys before bounded edge foreign keys', () => {
+    const migration = readFileSync(
+      new URL('../drizzle/0004_bounded_graph_risk.sql', import.meta.url),
+      'utf8',
+    );
+    const nodeKey = migration.indexOf(
+      'CREATE UNIQUE INDEX "graph_nodes_tenant_internal_id_unique"',
+    );
+    const sourceForeignKey = migration.indexOf(
+      'ALTER TABLE "graph_edges" ADD CONSTRAINT "graph_edges_tenant_source_fk"',
+    );
+
+    expect(nodeKey).toBeGreaterThanOrEqual(0);
+    expect(sourceForeignKey).toBeGreaterThan(nodeKey);
+    expect(migration).toContain('CONSTRAINT "graph_edges_no_self_loop"');
+  });
 });

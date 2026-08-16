@@ -84,4 +84,56 @@ describe('three-eye deterministic evaluation', () => {
     );
     expect(result.decision).toBe('ALLOW');
   });
+
+  it('uses bounded graph evidence instead of inferring risk from token text', () => {
+    const textOnly = evaluatePaymentIntent(
+      {
+        ...trustedIntent,
+        beneficiary: { ...trustedIntent.beneficiary, vpa_token: 'vpa_tok_mule_text_only' },
+      },
+      context,
+    );
+    const graphLinked = evaluatePaymentIntent(trustedIntent, {
+      ...context,
+      graphRisk: {
+        linkedConfirmedCases: 2,
+        minimumHops: 2,
+        contribution: 75,
+        truncated: false,
+      },
+    });
+
+    expect(textOnly.reasons).not.toContainEqual(
+      expect.objectContaining({ code: 'GRAPH_LINKED_DESTINATION' }),
+    );
+    expect(graphLinked).toMatchObject({
+      decision: 'BLOCK',
+      risk_score: 92,
+      subscores: { integrity: 92 },
+    });
+    expect(graphLinked.reasons).toContainEqual({
+      code: 'GRAPH_LINKED_DESTINATION',
+      impact: 75,
+      user_message: 'The destination is linked to a reported synthetic risk cluster.',
+    });
+  });
+
+  it('steps up instead of silently allowing an incomplete bounded graph check', () => {
+    const result = evaluatePaymentIntent(trustedIntent, {
+      ...context,
+      graphRisk: {
+        linkedConfirmedCases: 0,
+        minimumHops: null,
+        contribution: 0,
+        truncated: true,
+      },
+    });
+
+    expect(result).toMatchObject({
+      decision: 'STEP_UP',
+      risk_score: 68,
+      subscores: { integrity: 68 },
+      reasons: [{ code: 'GRAPH_EVIDENCE_TRUNCATED', impact: 35 }],
+    });
+  });
 });

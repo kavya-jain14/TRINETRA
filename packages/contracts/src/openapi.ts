@@ -228,6 +228,26 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/demo/scenarios/mule-network/run': {
+      post: {
+        summary: 'Run one bounded two-hop mule-network scenario in non-production demo mode',
+        'x-demo-only': true,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/DemoRunRequest' } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Blocked graph-linked payment, bounded topology, and analyst case',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
     '/v1/demo/payments': {
       get: {
         summary: 'List recent fixed-scenario demo payments for the operations console',

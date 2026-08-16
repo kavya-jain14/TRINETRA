@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 import { FraudCaseSnapshotSchema } from './case.js';
 import { PaymentStateSchema } from './domain.js';
+import { GraphRiskSnapshotSchema } from './graph.js';
 import { RiskAssessmentSchema } from './payment-intent.js';
 import { PaymentResourceSchema, ProviderPaymentStatusSchema } from './payment-ledger.js';
 
@@ -48,6 +49,14 @@ export const DemoScenarioSchema = z.discriminatedUnion('key', [
     direction: z.literal('PUSH'),
     claimed_goal: z.literal('PAY_MERCHANT'),
   }),
+  z.object({
+    key: z.literal('mule-network'),
+    label: z.literal('Bounded mule-network proximity'),
+    counterparty_name: z.literal('Orchid Supplies Demo'),
+    amount_paise: z.literal(64_900),
+    direction: z.literal('PUSH'),
+    claimed_goal: z.literal('PAY_MERCHANT'),
+  }),
 ]);
 export type DemoScenario = z.infer<typeof DemoScenarioSchema>;
 
@@ -90,6 +99,7 @@ export const DemoPaymentSnapshotSchema = z.object({
   timeline: z.array(PaymentTimelineEventSchema),
   provider_attempts: z.array(ProviderAttemptSummarySchema),
   recovery: RecoveryClockSummarySchema.nullable(),
+  graph: GraphRiskSnapshotSchema.nullable(),
   fraud_case: FraudCaseSnapshotSchema.nullable(),
 });
 export type DemoPaymentSnapshot = z.infer<typeof DemoPaymentSnapshotSchema>;

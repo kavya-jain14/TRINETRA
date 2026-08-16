@@ -13,6 +13,7 @@ import {
   type CreatePaymentResult,
   type PaymentLedgerService,
 } from '@trinetra/payment-core';
+import type { GraphRiskService } from '@trinetra/graph-core';
 import { evaluatePaymentIntent, normalizePaymentPartyName } from '@trinetra/risk-core';
 
 import { authenticatePartnerRequest, type PartnerAuthConfig } from '../auth.js';
@@ -20,6 +21,7 @@ import { authenticatePartnerRequest, type PartnerAuthConfig } from '../auth.js';
 export interface PaymentIntentRouteConfig extends PartnerAuthConfig {
   ledgerService: PaymentLedgerService;
   caseService: CaseService;
+  graphService: GraphRiskService;
   tenantId: string;
   isTrustedDeviceToken: (deviceToken: string) => boolean;
 }
@@ -69,6 +71,11 @@ export async function registerPaymentIntentRoutes(
 
     const opaqueId = randomUUID().replaceAll('-', '');
     const paymentIntentId = `pi_${opaqueId}`;
+    const graph = await config.graphService.assessDestination(
+      config.tenantId,
+      parsed.data.beneficiary.vpa_token,
+      config.now(),
+    );
     const evaluated = RiskAssessmentSchema.parse(
       evaluatePaymentIntent(parsed.data, {
         now: config.now(),
@@ -77,6 +84,16 @@ export async function registerPaymentIntentRoutes(
         deviceTrust: config.isTrustedDeviceToken(parsed.data.context.device_token)
           ? 'TRUSTED'
           : 'UNKNOWN',
+        ...(graph.risk_contribution > 0 || graph.truncated
+          ? {
+              graphRisk: {
+                linkedConfirmedCases: graph.linked_confirmed_cases,
+                minimumHops: graph.minimum_hops,
+                contribution: graph.risk_contribution,
+                truncated: graph.truncated,
+              },
+            }
+          : {}),
       }),
     );
 
@@ -93,6 +110,7 @@ export async function registerPaymentIntentRoutes(
         amountPaise: parsed.data.amount_paise,
         currency: parsed.data.currency,
         decision: evaluated.decision,
+        ...(graph.risk_contribution > 0 || graph.truncated ? { decisionEvidence: { graph } } : {}),
       });
     } catch (error) {
       if (error instanceof IdempotencyConflictError) {

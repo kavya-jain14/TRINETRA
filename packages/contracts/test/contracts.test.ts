@@ -5,6 +5,7 @@ import {
   DemoRunRequestSchema,
   DemoScenarioSchema,
   FraudCaseSnapshotSchema,
+  GraphRiskSnapshotSchema,
   PartnerWebhookEnvelopeSchema,
   PaymentIntentRequestSchema,
   PaymentSubmissionRequestSchema,
@@ -113,6 +114,29 @@ describe('payment intent contracts', () => {
         claimed_goal: 'PAY_MERCHANT',
       }).key,
     ).toBe('reversal-recovery');
+    expect(
+      DemoScenarioSchema.parse({
+        key: 'mule-network',
+        label: 'Bounded mule-network proximity',
+        counterparty_name: 'Orchid Supplies Demo',
+        amount_paise: 64_900,
+        direction: 'PUSH',
+        claimed_goal: 'PAY_MERCHANT',
+      }).key,
+    ).toBe('mule-network');
+    expect(
+      GraphRiskSnapshotSchema.safeParse({
+        destination_ref: 'vpa_tok_graph_destination_47',
+        linked_confirmed_cases: 2,
+        minimum_hops: 2,
+        risk_contribution: 75,
+        max_hops: 2,
+        truncated: false,
+        observed_at: '2026-08-16T12:00:00.000Z',
+        nodes: [],
+        edges: [],
+      }).success,
+    ).toBe(true);
   });
 
   it('publishes an evidence-backed fraud case contract', () => {

@@ -16,7 +16,7 @@
 
 .scenario-switch {
   display: flex;
-  max-width: min(76vw, 720px);
+  max-width: min(80vw, 880px);
   gap: 0.35rem;
   padding: 0.25rem;
   border: 1px solid var(--line);

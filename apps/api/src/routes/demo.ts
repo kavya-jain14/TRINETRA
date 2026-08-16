@@ -11,6 +11,7 @@ import {
   DemoRunRequestSchema,
   FraudCaseListSchema,
   FraudCaseSnapshotSchema,
+  GraphRiskSnapshotSchema,
   PaymentResourceSchema,
   RiskAssessmentSchema,
   type DemoScenario,
@@ -21,6 +22,7 @@ import {
   type PaymentLedgerRepository,
   type PaymentLedgerService,
 } from '@trinetra/payment-core';
+import { syntheticMuleDestinationRef, type GraphRiskService } from '@trinetra/graph-core';
 import { evaluatePaymentIntent } from '@trinetra/risk-core';
 import { canonicalJson, sha256Hex } from '@trinetra/security';
 
@@ -125,6 +127,30 @@ const reversalRecoveryIntent = {
   },
 } as const satisfies PaymentIntentRequest;
 
+const muleNetworkIntent = {
+  partner_customer_ref: 'cust_demo_104',
+  direction: 'PUSH',
+  payment_type: 'P2M',
+  amount_paise: 64_900,
+  currency: 'INR',
+  beneficiary: {
+    vpa_token: syntheticMuleDestinationRef,
+    resolved_name: 'Orchid Supplies Demo',
+  },
+  merchant: {
+    merchant_ref: 'm_demo_orchid_18',
+    expected_name: 'Orchid Supplies Demo',
+    mcc: '5999',
+  },
+  context: {
+    channel: 'UPI_QR',
+    device_token: 'dev_tok_trusted',
+    session_ref: 'sess_demo_mule_network',
+    user_claimed_goal: 'PAY_MERCHANT',
+    remote_access_active: false,
+  },
+} as const satisfies PaymentIntentRequest;
+
 const scenarios = {
   'trusted-payment': {
     key: 'trusted-payment',
@@ -158,6 +184,14 @@ const scenarios = {
     direction: 'PUSH',
     claimed_goal: 'PAY_MERCHANT',
   },
+  'mule-network': {
+    key: 'mule-network',
+    label: 'Bounded mule-network proximity',
+    counterparty_name: 'Orchid Supplies Demo',
+    amount_paise: 64_900,
+    direction: 'PUSH',
+    claimed_goal: 'PAY_MERCHANT',
+  },
 } as const satisfies Readonly<Record<string, DemoScenario>>;
 
 type ScenarioKey = keyof typeof scenarios;
@@ -167,6 +201,7 @@ export interface DemoRouteConfig {
   repository: PaymentLedgerRepository;
   caseService: CaseService;
   caseRepository: CaseRepository;
+  graphService: GraphRiskService;
   tenantId: string;
   now: () => Date;
 }
@@ -210,6 +245,7 @@ function scenarioKeyFor(payment: PaymentIntentRecord): ScenarioKey | null {
   if (payment.idempotencyKey.startsWith('demo:refund-collect:')) return 'refund-collect';
   if (payment.idempotencyKey.startsWith('demo:timeout-recovery:')) return 'timeout-recovery';
   if (payment.idempotencyKey.startsWith('demo:reversal-recovery:')) return 'reversal-recovery';
+  if (payment.idempotencyKey.startsWith('demo:mule-network:')) return 'mule-network';
   return null;
 }
 
@@ -246,6 +282,10 @@ async function paymentSnapshot(config: DemoRouteConfig, payment: PaymentIntentRe
     config.repository.getRecoveryClock(payment.tenantId, payment.id),
     config.caseRepository.getCaseByPayment(payment.tenantId, payment.id),
   ]);
+  const graphEvidence = timeline.find(
+    (event) => event.source === 'RISK_ENGINE' && 'graph' in event.evidence,
+  )?.evidence.graph;
+  const graph = graphEvidence ? GraphRiskSnapshotSchema.parse(graphEvidence) : null;
 
   return DemoPaymentSnapshotSchema.parse({
     scenario: scenarios[scenarioKey],
@@ -279,6 +319,7 @@ async function paymentSnapshot(config: DemoRouteConfig, payment: PaymentIntentRe
           updated_at: recovery.updatedAt.toISOString(),
         }
       : null,
+    graph,
     fraud_case: fraudCase ? await caseSnapshot(config.caseRepository, fraudCase) : null,
   });
 }
@@ -289,9 +330,18 @@ async function runScenario(config: DemoRouteConfig, scenarioKey: ScenarioKey, ru
     'refund-collect': refundCollectIntent,
     'timeout-recovery': timeoutRecoveryIntent,
     'reversal-recovery': reversalRecoveryIntent,
+    'mule-network': muleNetworkIntent,
   };
   const intent = intents[scenarioKey];
   const paymentId = paymentIdFor(`${scenarioKey}:${runId}`);
+  if (scenarioKey === 'mule-network') {
+    await config.graphService.ensureSyntheticMuleFixture(config.tenantId, config.now());
+  }
+  const graph = await config.graphService.assessDestination(
+    config.tenantId,
+    intent.beneficiary.vpa_token,
+    config.now(),
+  );
   const evaluated = RiskAssessmentSchema.parse(
     evaluatePaymentIntent(intent, {
       now: config.now(),
@@ -299,6 +349,16 @@ async function runScenario(config: DemoRouteConfig, scenarioKey: ScenarioKey, ru
       traceId: `tr_demo_${paymentId.slice('pi_demo_'.length)}`,
       deviceTrust: 'TRUSTED',
       beneficiaryTrust: scenarioKey === 'refund-collect' ? 'NEW' : 'KNOWN',
+      ...(graph.risk_contribution > 0 || graph.truncated
+        ? {
+            graphRisk: {
+              linkedConfirmedCases: graph.linked_confirmed_cases,
+              minimumHops: graph.minimum_hops,
+              contribution: graph.risk_contribution,
+              truncated: graph.truncated,
+            },
+          }
+        : {}),
     }),
   );
   const created = await config.ledgerService.createRiskEvaluatedPayment({
@@ -312,6 +372,7 @@ async function runScenario(config: DemoRouteConfig, scenarioKey: ScenarioKey, ru
     amountPaise: intent.amount_paise,
     currency: intent.currency,
     decision: evaluated.decision,
+    ...(graph.risk_contribution > 0 || graph.truncated ? { decisionEvidence: { graph } } : {}),
   });
 
   const persistedAssessment = RiskAssessmentSchema.parse(created.responseBody);
@@ -322,7 +383,11 @@ async function runScenario(config: DemoRouteConfig, scenarioKey: ScenarioKey, ru
   );
 
   let payment = created.payment;
-  if (scenarioKey !== 'refund-collect' && payment.state === 'ALLOWED') {
+  if (
+    scenarioKey !== 'refund-collect' &&
+    scenarioKey !== 'mule-network' &&
+    payment.state === 'ALLOWED'
+  ) {
     const providerScenario =
       scenarioKey === 'trusted-payment'
         ? 'SUCCESS_IMMEDIATE'
@@ -393,6 +458,7 @@ export async function registerDemoRoutes(
     'refund-collect',
     'timeout-recovery',
     'reversal-recovery',
+    'mule-network',
   ] as const) {
     app.post(`/v1/demo/scenarios/${scenarioKey}/run`, async (request, reply) => {
       const parsed = DemoRunRequestSchema.safeParse(request.body);
