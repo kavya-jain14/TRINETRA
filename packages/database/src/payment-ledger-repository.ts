@@ -630,10 +630,11 @@ export class PostgresPaymentLedgerRepository implements PaymentLedgerRepository 
               pa.operation, pa.request_reference, pa.request_hash, pa.status,
               pa.provider_status, pa.response_code, pa.created_at, pa.completed_at
          FROM provider_attempts pa
-         JOIN payment_intents pi
+        JOIN payment_intents pi
            ON pi.tenant_id = pa.tenant_id AND pi.id = pa.payment_intent_id
         WHERE pa.tenant_id = $1 AND pi.external_ref = $2
-        ORDER BY pa.created_at, pa.id`,
+        ORDER BY CASE pa.operation WHEN 'SUBMIT' THEN 0 ELSE 1 END,
+                 pa.created_at, pa.id`,
       [tenantId, paymentId],
     );
     return result.rows.map(toAttempt);

@@ -86,6 +86,14 @@ h2 {
   color: var(--risk);
 }
 
+.decision-card.decision-pending {
+  border-color: color-mix(in srgb, var(--warning), var(--line) 40%);
+}
+
+.decision-card.decision-pending > strong {
+  color: var(--warning);
+}
+
 .decision-label,
 .lens-card span {
   color: var(--muted);
@@ -235,6 +243,76 @@ h2 {
   border-color: color-mix(in srgb, var(--risk), var(--line) 58%);
 }
 
+.recovery-panel {
+  margin-top: 1rem;
+  padding: clamp(1.25rem, 3vw, 2.2rem);
+  border-color: color-mix(in srgb, var(--warning), var(--line) 55%);
+}
+
+.recovery-state {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.recovery-state.is-pending {
+  color: var(--warning);
+}
+
+.recovery-state.is-resolved {
+  color: var(--safe);
+}
+
+.recovery-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.recovery-metrics article {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, var(--warning) 5%, transparent);
+}
+
+.recovery-metrics span,
+.recovery-metrics small {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.recovery-metrics strong {
+  display: block;
+  margin: 0.55rem 0;
+  color: var(--warning);
+  font-size: 1.5rem;
+}
+
+.attempt-list {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.attempt-row {
+  display: grid;
+  grid-template-columns: 1fr 0.7fr 0.9fr 1fr;
+  gap: 1rem;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.78rem;
+}
+
+.attempt-row span,
+.attempt-row code {
+  color: var(--muted);
+}
+
 .case-meta {
   display: grid;
   grid-template-columns: auto auto;
@@ -349,6 +427,10 @@ h2 {
     grid-template-columns: 1fr 3rem;
   }
 
+  .recovery-metrics {
+    grid-template-columns: 1fr;
+  }
+
   .evidence-row p,
   .evidence-row code {
     grid-column: 1 / -1;
@@ -389,5 +471,9 @@ h2 {
   .case-meta {
     margin-top: 1rem;
     text-align: left;
+  }
+
+  .attempt-row {
+    grid-template-columns: 1fr 1fr;
   }
 }

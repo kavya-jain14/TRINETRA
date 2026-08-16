@@ -4,6 +4,7 @@ import { PaymentStateSchema } from './domain.js';
 
 export const PROVIDER_SCENARIOS = [
   'SUCCESS_IMMEDIATE',
+  'TIMEOUT_THEN_SUCCESS',
   'PENDING_THEN_SUCCESS',
   'PENDING_THEN_REVERSED',
   'SOFT_DECLINE',

@@ -18,3 +18,17 @@ export async function runDemoScenario(
   if (!response.ok) throw new Error(`TRINETRA demo request failed (${response.status}).`);
   return DemoPaymentSnapshotSchema.parse(await response.json());
 }
+
+export async function recoverTimeoutScenario(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<DemoPaymentSnapshot> {
+  const response = await fetch('/api/v1/demo/scenarios/timeout-recovery/recover', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ run_id: runId }),
+    ...(signal ? { signal } : {}),
+  });
+  if (!response.ok) throw new Error(`TRINETRA recovery request failed (${response.status}).`);
+  return DemoPaymentSnapshotSchema.parse(await response.json());
+}

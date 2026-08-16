@@ -42,6 +42,41 @@ describe('deterministic PSP sandbox', () => {
     await app.close();
   });
 
+  it('accepts a payment before timing out and resolves it through status inquiry', async () => {
+    const app = await buildPspSandbox({
+      callbackSecret: 'foundation-demo-secret-at-least-32-characters',
+    });
+    const timedOut = await app.inject({
+      method: 'POST',
+      url: '/v1/simulate',
+      payload: {
+        payment_id: 'pi_timeout_demo',
+        amount_paise: 78_600,
+        scenario: 'TIMEOUT_THEN_SUCCESS',
+      },
+    });
+    const inquiry = await app.inject({
+      method: 'POST',
+      url: '/v1/inquire',
+      payload: {
+        providerRequestReference: 'psp_timeout_demo',
+        requestReference: 'status_timeout_demo_001',
+      },
+    });
+
+    expect(timedOut.statusCode).toBe(504);
+    expect(timedOut.json()).toMatchObject({
+      error: { code: 'TIMEOUT_UNKNOWN' },
+      provider_ref: 'psp_timeout_demo',
+    });
+    expect(inquiry.statusCode).toBe(200);
+    expect(inquiry.json()).toMatchObject({
+      providerStatus: 'SUCCEEDED',
+      providerReference: 'psp_timeout_demo',
+    });
+    await app.close();
+  });
+
   it('authenticates and deduplicates the synthetic partner webhook receiver', async () => {
     const callbackSecret = 'foundation-demo-secret-at-least-32-characters';
     const app = await buildPspSandbox({ callbackSecret });

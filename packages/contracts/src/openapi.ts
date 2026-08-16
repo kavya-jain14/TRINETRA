@@ -148,6 +148,46 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/demo/scenarios/timeout-recovery/run': {
+      post: {
+        summary: 'Run one accepted-but-timed-out payment in non-production demo mode',
+        'x-demo-only': true,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/DemoRunRequest' } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Original payment preserved as pending with one unknown submission',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/demo/scenarios/timeout-recovery/recover': {
+      post: {
+        summary: 'Run one deterministic status-first recovery inquiry in demo mode',
+        'x-demo-only': true,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/DemoRunRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Payment resolved without a second provider submission',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
     '/v1/demo/payments': {
       get: {
         summary: 'List recent fixed-scenario demo payments for the operations console',

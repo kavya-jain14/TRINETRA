@@ -44,6 +44,9 @@ call is recovered by inquiry and never by blind resubmission. API and worker pro
 PostgreSQL-backed synthetic PSP state instead of process-local maps.
 An interrupted `STARTED` status inquiry is safely resumed with the same stable request reference;
 the synthetic PSP durably replays its first response instead of advancing twice.
+The locked `TIMEOUT_THEN_SUCCESS` fixture persists provider acceptance before throwing its
+synthetic timeout. A later inquiry therefore resolves the original reference while a replayed
+submit remains a ledger-only duplicate.
 
 ## Recovery jobs
 

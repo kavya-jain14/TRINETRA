@@ -19,6 +19,7 @@ const SimulatorRequestSchema = z.object({
 
 const initialStatus = {
   SUCCESS_IMMEDIATE: 'SUCCEEDED',
+  TIMEOUT_THEN_SUCCESS: 'PENDING',
   PENDING_THEN_SUCCESS: 'PENDING',
   PENDING_THEN_REVERSED: 'PENDING',
   SOFT_DECLINE: 'FAILED_SOFT',
@@ -72,6 +73,16 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
     const providerReference = `psp_${parsed.data.payment_id.slice(3)}`;
     sandboxState.set(providerReference, { scenario: parsed.data.scenario, inquiryCount: 0 });
 
+    if (parsed.data.scenario === 'TIMEOUT_THEN_SUCCESS') {
+      return reply.code(504).send({
+        error: {
+          code: 'TIMEOUT_UNKNOWN',
+          message: 'Synthetic provider accepted the request but no final response was received.',
+        },
+        provider_ref: providerReference,
+      });
+    }
+
     const eventId = `pe_${randomUUID().replaceAll('-', '')}`;
     const providerEvent = ProviderCallbackSchema.parse({
       event_id: eventId,
@@ -124,7 +135,12 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
 
     payment.inquiryCount += 1;
     let providerStatus: string = initialStatus[payment.scenario as keyof typeof initialStatus];
-    if (payment.scenario === 'PENDING_THEN_SUCCESS') providerStatus = 'SUCCEEDED';
+    if (
+      payment.scenario === 'PENDING_THEN_SUCCESS' ||
+      payment.scenario === 'TIMEOUT_THEN_SUCCESS'
+    ) {
+      providerStatus = 'SUCCEEDED';
+    }
     if (payment.scenario === 'PENDING_THEN_REVERSED') {
       providerStatus = payment.inquiryCount === 1 ? 'REVERSAL_PENDING' : 'REVERSED';
     }

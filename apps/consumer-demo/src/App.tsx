@@ -2,7 +2,7 @@ import { useState } from 'react';
 
 import type { DemoPaymentSnapshot, DemoScenario } from '@trinetra/contracts';
 
-import { runDemoScenario } from './demo-api';
+import { recoverTimeoutScenario, runDemoScenario } from './demo-api';
 
 type ScenarioKey = DemoScenario['key'];
 
@@ -33,27 +33,44 @@ const journey = {
       ['Remote assistance', 'Active in synthetic fixture'],
     ],
   },
+  'timeout-recovery': {
+    eyebrow: 'Provider response interrupted',
+    counterparty: 'Metro Utilities Demo',
+    amount: '₹786',
+    mark: 'MU',
+    facts: [
+      ['Provider outcome', 'Accepted · final response missing'],
+      ['Safe ledger state', 'PENDING · not failed'],
+      ['Recovery rule', 'Check status · never pay twice'],
+    ],
+  },
 } as const;
 
 export function App() {
   const [scenario, setScenario] = useState<ScenarioKey>('trusted-payment');
   const [runId, setRunId] = useState(nextRunId);
   const [snapshot, setSnapshot] = useState<DemoPaymentSnapshot | null>(null);
-  const [status, setStatus] = useState<'idle' | 'running' | 'completed' | 'failed'>('idle');
+  const [status, setStatus] = useState<'idle' | 'running' | 'recovering' | 'completed' | 'failed'>(
+    'idle',
+  );
+  const [replayConfirmed, setReplayConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const selected = journey[scenario];
   const blocked = snapshot?.assessment.decision === 'BLOCK';
+  const pending = snapshot?.payment.state === 'PENDING';
+  const timeoutFlow = scenario === 'timeout-recovery';
 
   function reset(nextScenario = scenario) {
     setScenario(nextScenario);
     setRunId(nextRunId());
     setSnapshot(null);
+    setReplayConfirmed(false);
     setStatus('idle');
     setError(null);
   }
 
   async function inspectJourney() {
-    if (snapshot) {
+    if (snapshot && !pending) {
       reset();
       return;
     }
@@ -63,10 +80,23 @@ export function App() {
     try {
       const result = await runDemoScenario(scenario, runId);
       setSnapshot(result);
+      if (snapshot && timeoutFlow) setReplayConfirmed(true);
       setStatus('completed');
     } catch (caught) {
       setStatus('failed');
       setError(caught instanceof Error ? caught.message : 'TRINETRA demo request failed.');
+    }
+  }
+
+  async function recoverJourney() {
+    setStatus('recovering');
+    setError(null);
+    try {
+      setSnapshot(await recoverTimeoutScenario(runId));
+      setStatus('completed');
+    } catch (caught) {
+      setStatus('failed');
+      setError(caught instanceof Error ? caught.message : 'TRINETRA recovery request failed.');
     }
   }
 
@@ -89,12 +119,25 @@ export function App() {
           >
             Refund trap
           </button>
+          <button
+            type="button"
+            className={
+              scenario === 'timeout-recovery' ? 'is-active pending-option' : 'pending-option'
+            }
+            onClick={() => reset('timeout-recovery')}
+          >
+            Safe recovery
+          </button>
         </div>
       </div>
 
       <section
         className={
-          scenario === 'refund-collect' ? 'panel payment-card risk-flow' : 'panel payment-card'
+          scenario === 'refund-collect'
+            ? 'panel payment-card risk-flow'
+            : timeoutFlow
+              ? 'panel payment-card pending-flow'
+              : 'panel payment-card'
         }
         aria-labelledby="payment-title"
       >
@@ -116,12 +159,24 @@ export function App() {
 
         {snapshot ? (
           <section
-            className={blocked ? 'payment-result is-blocked' : 'payment-result'}
+            className={
+              blocked
+                ? 'payment-result is-blocked'
+                : pending
+                  ? 'payment-result is-pending'
+                  : 'payment-result'
+            }
             aria-live="polite"
           >
             <div className="result-state">
               <span className="status-dot" aria-hidden="true" />
-              {blocked ? 'Payment blocked before submission' : 'Payment succeeded'}
+              {blocked
+                ? 'Payment blocked before submission'
+                : pending
+                  ? 'Payment pending—not failed'
+                  : timeoutFlow
+                    ? 'Recovered safely · payment succeeded'
+                    : 'Payment succeeded'}
             </div>
             <div className="result-grid">
               <span>
@@ -148,6 +203,29 @@ export function App() {
                 </p>
               </div>
             ) : null}
+            {timeoutFlow ? (
+              <div className="safety-explanation recovery-explanation">
+                <strong>
+                  {pending
+                    ? 'Do not create another payment—the original provider reference is preserved.'
+                    : 'The original payment resolved through a status inquiry.'}
+                </strong>
+                <p>
+                  Provider submissions:{' '}
+                  {
+                    snapshot.provider_attempts.filter((attempt) => attempt.operation === 'SUBMIT')
+                      .length
+                  }
+                  {' · '}Status inquiries:{' '}
+                  {
+                    snapshot.provider_attempts.filter(
+                      (attempt) => attempt.operation === 'STATUS_INQUIRY',
+                    ).length
+                  }
+                  {replayConfirmed ? ' · Duplicate request returned the same resource.' : ''}
+                </p>
+              </div>
+            ) : null}
             <code>{snapshot.fraud_case?.case_id ?? snapshot.payment.payment_intent_id}</code>
           </section>
         ) : null}
@@ -157,21 +235,43 @@ export function App() {
         <button
           type="button"
           className={
-            scenario === 'refund-collect' ? 'primary-action risk-action' : 'primary-action'
+            scenario === 'refund-collect'
+              ? 'primary-action risk-action'
+              : timeoutFlow
+                ? 'primary-action pending-action'
+                : 'primary-action'
           }
           onClick={() => void inspectJourney()}
-          disabled={status === 'running'}
+          disabled={status === 'running' || status === 'recovering'}
         >
           {status === 'running'
             ? 'Evaluating all three lenses…'
-            : snapshot
+            : snapshot && !pending
               ? 'Reset this scenario'
-              : status === 'failed'
-                ? 'Retry safely'
-                : scenario === 'refund-collect'
-                  ? 'Inspect refund request'
-                  : 'Continue securely'}
+              : snapshot && timeoutFlow
+                ? replayConfirmed
+                  ? 'Replay confirmed · one submission only'
+                  : 'Retry same request safely'
+                : status === 'failed'
+                  ? 'Retry safely'
+                  : scenario === 'refund-collect'
+                    ? 'Inspect refund request'
+                    : timeoutFlow
+                      ? 'Submit once securely'
+                      : 'Continue securely'}
         </button>
+        {timeoutFlow && pending && replayConfirmed ? (
+          <button
+            type="button"
+            className="secondary-action"
+            onClick={() => void recoverJourney()}
+            disabled={status === 'recovering'}
+          >
+            {status === 'recovering'
+              ? 'Checking the original provider status…'
+              : 'Run status-first recovery'}
+          </button>
+        ) : null}
         <p className="foundation-note">
           Fixed synthetic scenario · partner signing material remains server-side and is never
           shipped to this browser.

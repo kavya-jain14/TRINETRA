@@ -12,7 +12,9 @@ import { enqueueDueWork } from '../src/scheduler.js';
 const tenantId = '00000000-0000-4000-8000-000000000001';
 const now = new Date('2026-08-10T12:00:00.000Z');
 
-async function pendingHarness(scenario: 'PENDING_THEN_SUCCESS' | 'PENDING_THEN_REVERSED') {
+async function pendingHarness(
+  scenario: 'TIMEOUT_THEN_SUCCESS' | 'PENDING_THEN_SUCCESS' | 'PENDING_THEN_REVERSED',
+) {
   const repository = new InMemoryPaymentLedgerRepository();
   const provider = new DeterministicPaymentProviderAdapter();
   let id = 0;
@@ -40,7 +42,7 @@ async function pendingHarness(scenario: 'PENDING_THEN_SUCCESS' | 'PENDING_THEN_R
 
 describe('recovery processors', () => {
   it('performs a status inquiry without a second provider submission', async () => {
-    const harness = await pendingHarness('PENDING_THEN_SUCCESS');
+    const harness = await pendingHarness('TIMEOUT_THEN_SUCCESS');
     const result = await processRecoveryJob(
       {
         tenantId,

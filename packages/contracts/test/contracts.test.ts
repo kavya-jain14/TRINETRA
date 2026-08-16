@@ -8,6 +8,7 @@ import {
   PaymentIntentRequestSchema,
   PaymentSubmissionRequestSchema,
   ProviderCallbackSchema,
+  ProviderScenarioSchema,
   RiskAssessmentSchema,
 } from '../src/index.js';
 
@@ -51,6 +52,7 @@ describe('payment intent contracts', () => {
 
   it('defaults synthetic submission to the immediate success scenario', () => {
     expect(PaymentSubmissionRequestSchema.parse({})).toEqual({ scenario: 'SUCCESS_IMMEDIATE' });
+    expect(ProviderScenarioSchema.parse('TIMEOUT_THEN_SUCCESS')).toBe('TIMEOUT_THEN_SUCCESS');
   });
 
   it('rejects provider callback states outside the published recovery contract', () => {
