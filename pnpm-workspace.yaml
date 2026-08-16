@@ -1,0 +1,18 @@
+packages:
+  - apps/*
+  - packages/*
+
+allowBuilds:
+  esbuild: true
+  msgpackr-extract: true
+
+catalog:
+  '@types/node': 26.2.0
+  fastify: 5.11.3
+  typescript: 6.0.3
+  vitest: 4.1.10
+  zod: 4.4.3
+
+minimumReleaseAgeExclude:
+  - bullmq@6.0.10
+  - tsx@4.23.12

@@ -1,0 +1,323 @@
+.consumer-shell {
+  display: grid;
+  place-items: center;
+}
+
+.consumer-header {
+  position: fixed;
+  top: 1.5rem;
+  left: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.scenario-switch {
+  display: flex;
+  max-width: min(76vw, 720px);
+  gap: 0.35rem;
+  padding: 0.25rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+  overflow-x: auto;
+}
+
+.scenario-switch button {
+  flex: 0 0 auto;
+  padding: 0.55rem 0.8rem;
+  border: 0;
+  border-radius: 0.55rem;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.scenario-switch button.is-active {
+  background: color-mix(in srgb, var(--safe) 12%, transparent);
+  color: var(--text);
+}
+
+.scenario-switch button.risk-option.is-active {
+  background: color-mix(in srgb, var(--risk) 12%, transparent);
+}
+
+.scenario-switch button.pending-option.is-active {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
+.payment-card {
+  width: min(100%, 480px);
+  padding: clamp(1.5rem, 5vw, 3rem);
+  text-align: center;
+}
+
+.payment-card.risk-flow {
+  border-color: color-mix(in srgb, var(--risk), var(--line) 48%);
+}
+
+.payment-card.pending-flow {
+  border-color: color-mix(in srgb, var(--warning), var(--line) 48%);
+}
+
+.risk-flow .merchant-mark {
+  background: color-mix(in srgb, var(--risk) 8%, var(--surface));
+}
+
+.pending-flow .merchant-mark {
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+  color: var(--warning);
+}
+
+.merchant-mark {
+  display: grid;
+  width: 4rem;
+  height: 4rem;
+  margin: 0 auto 1.2rem;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 1.25rem;
+  background: var(--surface);
+  color: var(--risk);
+  font-weight: 900;
+}
+
+.muted,
+.foundation-note {
+  color: var(--muted);
+}
+
+.payment-card h1 {
+  margin: 0.3rem 0 1.5rem;
+  font-size: clamp(1.7rem, 7vw, 2.7rem);
+}
+
+.amount {
+  font-size: clamp(3.8rem, 16vw, 6.5rem);
+  font-weight: 800;
+  letter-spacing: -0.07em;
+}
+
+.payment-facts {
+  margin: 2rem 0;
+  text-align: left;
+}
+
+.payment-facts div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.payment-facts dt {
+  color: var(--muted);
+}
+
+.payment-facts dd {
+  margin: 0;
+  text-align: right;
+}
+
+.payment-card .primary-action {
+  width: 100%;
+  padding: 1rem;
+  border: 0;
+  border-radius: 0.9rem;
+  background: var(--safe);
+  color: #06160f;
+  font-weight: 800;
+}
+
+.payment-card .primary-action.risk-action {
+  background: var(--risk);
+  color: #1c0508;
+}
+
+.payment-card .primary-action.pending-action {
+  background: var(--warning);
+  color: #201503;
+}
+
+.payment-card .secondary-action {
+  width: 100%;
+  margin-top: 0.65rem;
+  padding: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--warning), var(--line) 45%);
+  border-radius: 0.9rem;
+  background: transparent;
+  color: var(--warning);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.payment-card .secondary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.payment-card .primary-action:not(:disabled) {
+  cursor: pointer;
+}
+
+.payment-card .primary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+.foundation-note {
+  margin: 1rem 0 0;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.payment-result {
+  margin: 0 0 1.25rem;
+  padding: 1rem;
+  border: 1px solid color-mix(in srgb, var(--safe), var(--line) 55%);
+  border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--safe) 8%, var(--surface));
+  text-align: left;
+}
+
+.result-state {
+  margin-bottom: 0.9rem;
+  color: var(--safe);
+  font-weight: 800;
+}
+
+.payment-result.is-blocked {
+  border-color: color-mix(in srgb, var(--risk), var(--line) 45%);
+  background: color-mix(in srgb, var(--risk) 7%, var(--surface));
+}
+
+.payment-result.is-blocked .result-state {
+  color: var(--risk);
+}
+
+.payment-result.is-blocked .status-dot {
+  background: var(--risk);
+  box-shadow: 0 0 16px var(--risk);
+}
+
+.payment-result.is-pending {
+  border-color: color-mix(in srgb, var(--warning), var(--line) 45%);
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+}
+
+.payment-result.is-pending .result-state,
+.recovery-explanation > strong {
+  color: var(--warning);
+}
+
+.payment-result.is-pending .status-dot {
+  background: var(--warning);
+  box-shadow: 0 0 16px var(--warning);
+}
+
+.safety-explanation {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+  line-height: 1.5;
+}
+
+.safety-explanation > strong {
+  color: var(--text);
+}
+
+.safety-explanation ul {
+  margin: 0.7rem 0;
+  padding-left: 1.2rem;
+  color: var(--muted);
+}
+
+.safety-explanation p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.policy-clock {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+
+.policy-clock span {
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.policy-clock strong {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--warning);
+  font-size: 0.8rem;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+  color: var(--muted);
+  font-size: 0.75rem;
+}
+
+.result-grid strong {
+  display: block;
+  margin-top: 0.25rem;
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.payment-result code {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.9rem;
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.error-message {
+  color: var(--risk);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+@media (max-width: 480px) {
+  .consumer-shell {
+    padding-top: 7.5rem;
+  }
+
+  .consumer-header {
+    display: block;
+  }
+
+  .scenario-switch {
+    margin-top: 0.8rem;
+    overflow-x: auto;
+  }
+
+  .scenario-switch button {
+    flex: 0 0 auto;
+  }
+
+  .result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .policy-clock {
+    grid-template-columns: 1fr;
+  }
+}

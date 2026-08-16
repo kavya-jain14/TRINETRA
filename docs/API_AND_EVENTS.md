@@ -1,0 +1,113 @@
+# API and events
+
+Base path: `/v1`. JSON schemas originate in `@trinetra/contracts`; `/openapi.json` publishes the foundation document.
+
+## Signed writes
+
+Every partner write includes:
+
+- `Idempotency-Key`
+- `X-Partner-Key`
+- `X-Timestamp` as Unix seconds
+- `X-Nonce`
+- `X-Signature` as lowercase hex HMAC-SHA256
+
+The canonical request is:
+
+```text
+UPPERCASE_METHOD + "\n" +
+CANONICAL_PATH + "\n" +
+TIMESTAMP + "\n" +
+NONCE + "\n" +
+SHA256_HEX(CANONICAL_JSON_BODY)
+```
+
+Canonical JSON recursively sorts object keys, preserves array order, removes properties whose value is `undefined`, rejects non-finite numbers, and emits compact UTF-8 JSON. The reference implementation is `canonicalJson` in `@trinetra/security`.
+
+The server permits five minutes of clock skew. A valid partner nonce is consumed once. Reusing a
+tenant-scoped payment-intent idempotency key with the same canonical body returns the original
+logical result; changing the body returns `IDEMPOTENCY_CONFLICT`.
+
+Provider callbacks use the same canonical HMAC construction without partner or idempotency
+headers. Callback `event_id` is the durable deduplication key so an authenticated redelivery can
+receive a successful `DUPLICATE` acknowledgement.
+
+## Payment endpoints
+
+- `POST /v1/payment-intents` evaluates the three risk lenses and atomically creates the intent,
+  initial state event, outbox event, and replay record in PostgreSQL.
+- `POST /v1/payment-intents/{paymentId}/submit` accepts only an eligible payment, persists one
+  stable provider request reference, and never performs a second provider submission.
+- `POST /v1/provider-events/trinetra-sandbox` verifies the provider signature, deduplicates the
+  provider event, and applies only a legal monotonic transition.
+
+A `BLOCK` assessment opens or replays one tenant-scoped fraud case for the payment. `BLOCKED`
+payments cannot cross the provider-submission state boundary.
+
+## Demo-only browser boundary
+
+`DEMO_MODE=true` registers a deliberately narrow synthetic interface:
+
+- `POST /v1/demo/scenarios/trusted-payment/run` runs only the fixed ₹249 trusted-merchant fixture.
+- `POST /v1/demo/scenarios/refund-collect/run` runs only the fixed deceptive refund collect fixture.
+- `POST /v1/demo/scenarios/timeout-recovery/run` submits the fixed accepted-timeout fixture once.
+- `POST /v1/demo/scenarios/timeout-recovery/recover` performs one status-first recovery pulse for
+  that fixed run. The production worker performs the same inquiry through the ledger service.
+- `POST /v1/demo/scenarios/reversal-recovery/run` submits the fixed ₹425
+  merchant-confirmation-missing fixture once.
+- `POST /v1/demo/scenarios/reversal-recovery/recover` advances one status-first pulse from
+  `PENDING` to `REVERSAL_PENDING`, then to `REVERSED`; terminal calls are read-only replays.
+- `GET /v1/demo/payments` returns recent durable demo snapshots for the operations console.
+- `GET /v1/demo/payments/{paymentId}` returns one immutable state/provider timeline.
+- `GET /v1/demo/cases` returns recent durable synthetic fraud cases and evidence.
+- `GET /v1/demo/cases/{caseId}` returns one immutable case timeline.
+
+These routes accept no payee, amount, provider scenario, tenant, or credential input. Recovery is
+bound to the opaque run ID and the original provider reference. They are
+disabled by default and configuration validation rejects demo mode in production. Partner and
+provider APIs remain HMAC-authenticated; neither React bundle receives signing material. Local
+Vite servers proxy `/api` to the Fastify process so no permissive CORS policy is required.
+
+Reversal timestamps are accelerated synthetic demo clocks. They visualize the T+5/complaint
+policy workflow without claiming that TRINETRA executes a bank reversal or changes the applicable
+real-world timeline.
+
+The demo case reads return only synthetic `pi_demo_*`/`case_demo_*` aggregates. Evidence references
+are bounded, tokenised categories such as `device:remote_access_active`; they never contain a raw
+VPA, cleartext receiver, credential, or secret.
+
+Health endpoints are separate:
+
+- `GET /health/live`
+- `GET /health/ready`
+
+`/health/live` only proves the process can answer. `/health/ready` actively checks required PostgreSQL and Redis connections and returns HTTP `503` with dependency status when either is unavailable.
+
+- `GET /openapi.json`
+
+## Stable error shape
+
+```json
+{
+  "error": {
+    "code": "IDEMPOTENCY_CONFLICT",
+    "message": "The idempotency key is already bound to a different request body.",
+    "trace_id": "tr_..."
+  }
+}
+```
+
+Unknown errors never include a stack trace or raw provider message.
+
+## Event discipline
+
+Domain event names are published in `DomainEventTypeSchema`. A durable mutation, append-only state
+event, and outbox record commit in the same PostgreSQL transaction. Event consumers are
+at-least-once and therefore idempotent. Provider calls occur only after the submission transaction
+commits; unknown outcomes become `PENDING` and schedule status-first recovery.
+
+Partner outbox delivery uses the strict `PartnerWebhookEnvelope` contract. The worker sends
+canonical JSON with `Idempotency-Key`, `X-TRINETRA-Delivery-Key`, and an HMAC-SHA256
+`X-TRINETRA-Signature`. Receivers deduplicate the stable delivery key and return `2xx` only after
+accepting or recognizing the event. Development uses the synthetic `POST /v1/partner-events`
+receiver; production configuration requires an HTTPS endpoint.
