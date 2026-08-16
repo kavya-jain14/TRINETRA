@@ -586,6 +586,87 @@ describe('TRINETRA partner API foundation', () => {
     await app.close();
   });
 
+  it('tracks a missing merchant confirmation through reversal without a second debit', async () => {
+    const repository = new InMemoryPaymentLedgerRepository();
+    const provider = new DeterministicPaymentProviderAdapter();
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      ledgerRepository: repository,
+      paymentProvider: provider,
+      demoMode: true,
+    });
+    const payload = { run_id: 'run_reversal001' };
+
+    const pending = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/reversal-recovery/run',
+      payload,
+    });
+    const reversalPending = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/reversal-recovery/recover',
+      payload,
+    });
+    const reversed = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/reversal-recovery/recover',
+      payload,
+    });
+    const terminalReplay = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/reversal-recovery/recover',
+      payload,
+    });
+
+    expect(pending.statusCode).toBe(201);
+    expect(pending.json()).toMatchObject({
+      scenario: { key: 'reversal-recovery', amount_paise: 42_500 },
+      assessment: { decision: 'ALLOW' },
+      payment: { state: 'PENDING' },
+      provider_attempts: [{ operation: 'SUBMIT', status: 'COMPLETED', provider_status: 'PENDING' }],
+    });
+    expect(reversalPending.statusCode).toBe(200);
+    expect(reversalPending.json()).toMatchObject({
+      payment: { state: 'REVERSAL_PENDING' },
+      recovery: {
+        reversal_due_at: '2026-08-10T12:00:30.000Z',
+        complaint_eligible_at: '2026-08-10T12:02:00.000Z',
+        resolved_at: null,
+      },
+    });
+    expect(reversed.statusCode).toBe(200);
+    expect(reversed.json().payment.state).toBe('REVERSED');
+    expect(reversed.json().timeline.map((event: { to_state: string }) => event.to_state)).toEqual([
+      'CREATED',
+      'RISK_EVALUATING',
+      'ALLOWED',
+      'SUBMITTED',
+      'PENDING',
+      'REVERSAL_PENDING',
+      'REVERSED',
+    ]);
+    expect(
+      reversed
+        .json()
+        .provider_attempts.map((attempt: { operation: string; provider_status: string | null }) => [
+          attempt.operation,
+          attempt.provider_status,
+        ]),
+    ).toEqual([
+      ['SUBMIT', 'PENDING'],
+      ['STATUS_INQUIRY', 'REVERSAL_PENDING'],
+      ['STATUS_INQUIRY', 'REVERSED'],
+    ]);
+    expect(reversed.json().recovery.resolved_at).toBe(fixedNow.toISOString());
+    expect(terminalReplay.statusCode).toBe(200);
+    expect(terminalReplay.json().provider_attempts).toHaveLength(3);
+    expect(provider.submissionCount).toBe(1);
+    expect(provider.inquiryCount).toBe(2);
+    await app.close();
+  });
+
   it('blocks the deceptive refund collect flow, opens one case, and never calls the provider', async () => {
     const repository = new InMemoryPaymentLedgerRepository();
     const caseRepository = new InMemoryCaseRepository();

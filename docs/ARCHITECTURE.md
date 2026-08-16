@@ -48,14 +48,19 @@ code do not invent analyst meaning. The in-memory case repository exists only fo
 ## Golden-flow demo boundary
 
 The consumer and operations applications never hold a partner HMAC secret. In explicit local demo
-mode, Fastify exposes three fixed synthetic scenario commands, one bounded recovery-lab action,
+mode, Fastify exposes four fixed synthetic scenario commands, two bounded recovery-lab actions,
 and read-only durable timeline views.
 Each command accepts only an opaque run ID, uses the same risk, payment, and case services as
 partner routes, and cannot select arbitrary amounts, payees, tenants, or provider behaviours.
 Production configuration rejects demo mode. The operations console polls PostgreSQL-backed
 snapshots, so a refresh or another API replica observes the same payment, recovery clock, and case
-state. The recovery-lab action calls the same status-inquiry service as the BullMQ worker; it cannot
+state. Each recovery-lab action calls the same status-inquiry service as the BullMQ worker; it cannot
 select a provider reference or create another submission.
+
+The reversal lab uses state-specific inquiry keys: one pulse may advance `PENDING` to
+`REVERSAL_PENDING`, and a distinct next-state pulse may advance it to `REVERSED`. A terminal call
+does not contact the provider. The UI labels the short prototype deadlines as accelerated policy
+clocks; actual reversal execution and regulatory timing remain outside TRINETRA's boundary.
 
 ## Module boundary rule
 

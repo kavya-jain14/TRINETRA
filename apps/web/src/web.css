@@ -294,6 +294,15 @@ h2 {
   font-size: 1.5rem;
 }
 
+.recovery-policy-note {
+  margin: 1rem 0 0;
+  padding: 0.8rem 1rem;
+  border-left: 3px solid var(--warning);
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
 .attempt-list {
   margin-top: 1rem;
   border-top: 1px solid var(--line);

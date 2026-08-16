@@ -40,6 +40,14 @@ export const DemoScenarioSchema = z.discriminatedUnion('key', [
     direction: z.literal('PUSH'),
     claimed_goal: z.literal('PAY_MERCHANT'),
   }),
+  z.object({
+    key: z.literal('reversal-recovery'),
+    label: z.literal('Merchant confirmation missing with safe reversal'),
+    counterparty_name: z.literal('Harbor Cafe Demo'),
+    amount_paise: z.literal(42_500),
+    direction: z.literal('PUSH'),
+    claimed_goal: z.literal('PAY_MERCHANT'),
+  }),
 ]);
 export type DemoScenario = z.infer<typeof DemoScenarioSchema>;
 

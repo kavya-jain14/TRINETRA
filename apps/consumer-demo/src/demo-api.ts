@@ -19,11 +19,12 @@ export async function runDemoScenario(
   return DemoPaymentSnapshotSchema.parse(await response.json());
 }
 
-export async function recoverTimeoutScenario(
+export async function recoverDemoScenario(
+  scenario: 'timeout-recovery' | 'reversal-recovery',
   runId: string,
   signal?: AbortSignal,
 ): Promise<DemoPaymentSnapshot> {
-  const response = await fetch('/api/v1/demo/scenarios/timeout-recovery/recover', {
+  const response = await fetch(`/api/v1/demo/scenarios/${scenario}/recover`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ run_id: runId }),

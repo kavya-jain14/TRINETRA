@@ -188,6 +188,46 @@ export const openApiDocument = {
         },
       },
     },
+    '/v1/demo/scenarios/reversal-recovery/run': {
+      post: {
+        summary: 'Run one merchant-confirmation-missing payment in non-production demo mode',
+        'x-demo-only': true,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/DemoRunRequest' } },
+          },
+        },
+        responses: {
+          '201': {
+            description: 'Original payment preserved as pending with one provider submission',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
+    '/v1/demo/scenarios/reversal-recovery/recover': {
+      post: {
+        summary: 'Advance one deterministic reversal status inquiry in demo mode',
+        'x-demo-only': true,
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': { schema: { $ref: '#/components/schemas/DemoRunRequest' } },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'Original payment advances toward or reaches a durable reversal',
+            content: {
+              'application/json': { schema: { $ref: '#/components/schemas/DemoPaymentSnapshot' } },
+            },
+          },
+        },
+      },
+    },
     '/v1/demo/payments': {
       get: {
         summary: 'List recent fixed-scenario demo payments for the operations console',
