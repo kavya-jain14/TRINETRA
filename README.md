@@ -1,3 +1,5 @@
+ HEAD
+# Keerti-Project-Trinetra
 # TRINETRA
 
 TRINETRA is an explainable control layer for UPI partners. It combines three pre-authorisation risk lenses—Identity, Intent, and Integrity—with a state-safe payment ledger and recovery orchestrator.
@@ -104,3 +106,4 @@ The consumer explicitly says not to pay again, while operations shows one submis
 inquiries, the durable policy-clock evidence, and the complete monotonic timeline. Real regulatory
 timing and reversal execution remain the responsibility of the partner bank or PSP; the prototype
 only visualizes and monitors them. PostgreSQL/Redis CI proves the two-pulse flow across API replicas.
+ origin/main
