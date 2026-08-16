@@ -21,6 +21,7 @@ interface SyntheticProviderRow extends QueryResultRow {
 
 const initialStatus: Readonly<Record<ProviderScenario, ProviderPaymentStatus>> = {
   SUCCESS_IMMEDIATE: 'SUCCEEDED',
+  TIMEOUT_THEN_SUCCESS: 'PENDING',
   PENDING_THEN_SUCCESS: 'PENDING',
   PENDING_THEN_REVERSED: 'PENDING',
   SOFT_DECLINE: 'FAILED_SOFT',
@@ -32,7 +33,9 @@ const initialStatus: Readonly<Record<ProviderScenario, ProviderPaymentStatus>> =
 };
 
 function statusAfterInquiry(row: SyntheticProviderRow): ProviderPaymentStatus {
-  if (row.scenario === 'PENDING_THEN_SUCCESS') return 'SUCCEEDED';
+  if (row.scenario === 'PENDING_THEN_SUCCESS' || row.scenario === 'TIMEOUT_THEN_SUCCESS') {
+    return 'SUCCEEDED';
+  }
   if (row.scenario === 'PENDING_THEN_REVERSED') {
     return row.inquiry_count + 1 === 1 ? 'REVERSAL_PENDING' : 'REVERSED';
   }
@@ -77,6 +80,9 @@ export class PostgresDeterministicPaymentProviderAdapter implements PaymentProvi
       stored.scenario !== input.scenario
     ) {
       throw new Error('Synthetic provider reference is already bound to different content.');
+    }
+    if (input.scenario === 'TIMEOUT_THEN_SUCCESS') {
+      throw new Error('Synthetic provider response timed out after accepting the submission.');
     }
     return {
       providerStatus: stored.current_status,

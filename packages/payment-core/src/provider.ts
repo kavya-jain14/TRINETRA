@@ -37,6 +37,7 @@ interface SyntheticPayment {
 
 const initialProviderStatus: Readonly<Record<ProviderScenario, ProviderPaymentStatus>> = {
   SUCCESS_IMMEDIATE: 'SUCCEEDED',
+  TIMEOUT_THEN_SUCCESS: 'PENDING',
   PENDING_THEN_SUCCESS: 'PENDING',
   PENDING_THEN_REVERSED: 'PENDING',
   SOFT_DECLINE: 'FAILED_SOFT',
@@ -69,6 +70,9 @@ export class DeterministicPaymentProviderAdapter implements PaymentProviderAdapt
       lastInquiryRequestReference: null,
       lastInquiryStatus: null,
     });
+    if (input.scenario === 'TIMEOUT_THEN_SUCCESS') {
+      throw new Error('Synthetic provider response timed out after accepting the submission.');
+    }
     const providerStatus = initialProviderStatus[input.scenario];
     return {
       providerStatus,
@@ -108,7 +112,12 @@ export class DeterministicPaymentProviderAdapter implements PaymentProviderAdapt
 
     payment.inquiryCount += 1;
     let providerStatus = initialProviderStatus[payment.scenario];
-    if (payment.scenario === 'PENDING_THEN_SUCCESS') providerStatus = 'SUCCEEDED';
+    if (
+      payment.scenario === 'PENDING_THEN_SUCCESS' ||
+      payment.scenario === 'TIMEOUT_THEN_SUCCESS'
+    ) {
+      providerStatus = 'SUCCEEDED';
+    }
     if (payment.scenario === 'PENDING_THEN_REVERSED') {
       providerStatus = payment.inquiryCount === 1 ? 'REVERSAL_PENDING' : 'REVERSED';
     }

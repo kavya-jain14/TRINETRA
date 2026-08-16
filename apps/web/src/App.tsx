@@ -94,6 +94,10 @@ export function App() {
         },
       ]
     : [];
+  const submitAttempts =
+    selected?.provider_attempts.filter((attempt) => attempt.operation === 'SUBMIT') ?? [];
+  const statusInquiries =
+    selected?.provider_attempts.filter((attempt) => attempt.operation === 'STATUS_INQUIRY') ?? [];
 
   return (
     <main className="app-shell command-center">
@@ -121,7 +125,9 @@ export function App() {
               className={
                 selected.assessment.decision === 'BLOCK'
                   ? 'panel decision-card decision-blocked'
-                  : 'panel decision-card'
+                  : selected.payment.state === 'PENDING'
+                    ? 'panel decision-card decision-pending'
+                    : 'panel decision-card'
               }
             >
               <span className="decision-label">Decision</span>
@@ -133,7 +139,7 @@ export function App() {
               <small>
                 {selected.provider_attempts.length === 0
                   ? 'No provider submission'
-                  : `${selected.provider_attempts.length} provider attempt`}
+                  : `${submitAttempts.length} submission · ${statusInquiries.length} status inquiry`}
               </small>
             </article>
             {lensScores.map((lens) => (
@@ -248,6 +254,61 @@ export function App() {
             </section>
           ) : null}
 
+          {selected.recovery ? (
+            <section className="panel recovery-panel" aria-labelledby="recovery-title">
+              <div className="section-heading">
+                <div>
+                  <div className="eyebrow">Status-first recovery</div>
+                  <h2 id="recovery-title">One payment reference. Zero blind retries.</h2>
+                </div>
+                <span
+                  className={
+                    selected.recovery.resolved_at
+                      ? 'recovery-state is-resolved'
+                      : 'recovery-state is-pending'
+                  }
+                >
+                  {selected.recovery.resolved_at ? 'RESOLVED' : 'MONITORING'}
+                </span>
+              </div>
+              <div className="recovery-metrics">
+                <article>
+                  <span>Provider submissions</span>
+                  <strong>{submitAttempts.length}</strong>
+                  <small>Original request only</small>
+                </article>
+                <article>
+                  <span>Status inquiries</span>
+                  <strong>{statusInquiries.length}</strong>
+                  <small>Original provider reference</small>
+                </article>
+                <article>
+                  <span>Next status check</span>
+                  <strong>
+                    {selected.recovery.status_check_due_at
+                      ? formatTime(selected.recovery.status_check_due_at)
+                      : 'Complete'}
+                  </strong>
+                  <small>
+                    {selected.recovery.pending_expires_at
+                      ? `Pending bound ${formatTime(selected.recovery.pending_expires_at)}`
+                      : 'No active pending clock'}
+                  </small>
+                </article>
+              </div>
+              <div className="attempt-list" role="list">
+                {selected.provider_attempts.map((attempt) => (
+                  <div className="attempt-row" role="listitem" key={attempt.attempt_id}>
+                    <strong>{attempt.operation.replaceAll('_', ' ')}</strong>
+                    <span>{attempt.status}</span>
+                    <span>{attempt.provider_status ?? 'NO FINAL RESPONSE'}</span>
+                    <code>{attempt.response_code ?? 'NO RESPONSE CODE'}</code>
+                  </div>
+                ))}
+              </div>
+            </section>
+          ) : null}
+
           <section className="panel timeline-panel">
             <div className="section-heading">
               <div>
@@ -255,7 +316,9 @@ export function App() {
                 <h2>
                   {selected.scenario.key === 'refund-collect'
                     ? 'Blocked before provider boundary'
-                    : 'Golden payment checkpoint'}
+                    : selected.scenario.key === 'timeout-recovery'
+                      ? 'Timeout without duplicate debit'
+                      : 'Golden payment checkpoint'}
                 </h2>
               </div>
               <span className="contract-chip">
@@ -277,7 +340,7 @@ export function App() {
         <section className="panel empty-state">
           <div className="eyebrow">Awaiting first event</div>
           <h2>No demo payment yet.</h2>
-          <p>Open the consumer demo on port 5174 and run either fixed scenario.</p>
+          <p>Open the consumer demo on port 5174 and run one of the fixed scenarios.</p>
         </section>
       )}
     </main>

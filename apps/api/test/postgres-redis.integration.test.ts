@@ -7,6 +7,7 @@ import {
   createDatabase,
   ensureTenant,
   PostgresCaseRepository,
+  PostgresDeterministicPaymentProviderAdapter,
   PostgresPaymentLedgerRepository,
 } from '@trinetra/database';
 import { canonicalJson, RedisNonceStore, signPartnerRequest } from '@trinetra/security';
@@ -89,6 +90,7 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
       now: () => fixedNow,
       ledgerRepository: repository,
       caseRepository,
+      paymentProvider: new PostgresDeterministicPaymentProviderAdapter(pool),
       tenantId,
       trustedDeviceTokens: ['dev_tok_integration_trusted'],
       demoMode: true,
@@ -182,6 +184,51 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
       'SUBMITTED',
       'SUCCEEDED',
     ]);
+  });
+
+  it('recovers an accepted timeout across replicas without a duplicate submission', async () => {
+    const primary = apps[0]!;
+    const replica = apps[1]!;
+    const runId = `run_${randomUUID().replaceAll('-', '')}`;
+
+    const pending = await primary.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/timeout-recovery/run',
+      payload: { run_id: runId },
+    });
+    const replayedAcrossReplica = await replica.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/timeout-recovery/run',
+      payload: { run_id: runId },
+    });
+    const recoveredAcrossReplica = await replica.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/timeout-recovery/recover',
+      payload: { run_id: runId },
+    });
+
+    expect(pending.statusCode).toBe(201);
+    expect(pending.json()).toMatchObject({
+      payment: { state: 'PENDING' },
+      provider_attempts: [
+        { operation: 'SUBMIT', status: 'UNKNOWN', response_code: 'TIMEOUT_UNKNOWN' },
+      ],
+    });
+    expect(replayedAcrossReplica.statusCode).toBe(200);
+    expect(replayedAcrossReplica.json().payment.payment_intent_id).toBe(
+      pending.json().payment.payment_intent_id,
+    );
+    expect(replayedAcrossReplica.json().provider_attempts).toHaveLength(1);
+    expect(recoveredAcrossReplica.statusCode).toBe(200);
+    expect(recoveredAcrossReplica.json().payment.state).toBe('SUCCEEDED');
+    expect(
+      recoveredAcrossReplica
+        .json()
+        .provider_attempts.map((attempt: { operation: string }) => attempt.operation),
+    ).toEqual(['SUBMIT', 'STATUS_INQUIRY']);
+    expect(
+      recoveredAcrossReplica.json().timeline.map((event: { to_state: string }) => event.to_state),
+    ).toEqual(['CREATED', 'RISK_EVALUATING', 'ALLOWED', 'SUBMITTED', 'PENDING', 'SUCCEEDED']);
   });
 
   it('persists a blocked refund case and its evidence across API replicas', async () => {

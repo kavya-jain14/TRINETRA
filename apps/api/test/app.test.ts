@@ -3,7 +3,10 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryCaseRepository } from '@trinetra/case-core';
 import { apiEnvSchema } from '@trinetra/config';
 import { canonicalJson, signPartnerRequest } from '@trinetra/security';
-import { InMemoryPaymentLedgerRepository } from '@trinetra/payment-core';
+import {
+  DeterministicPaymentProviderAdapter,
+  InMemoryPaymentLedgerRepository,
+} from '@trinetra/payment-core';
 
 import { buildApp } from '../src/app.js';
 
@@ -501,6 +504,85 @@ describe('TRINETRA partner API foundation', () => {
     expect(replay.json().provider_attempts).toHaveLength(1);
     expect(listed.statusCode).toBe(200);
     expect(listed.json().payments).toHaveLength(1);
+    await app.close();
+  });
+
+  it('recovers an accepted timeout without creating a second provider submission', async () => {
+    const repository = new InMemoryPaymentLedgerRepository();
+    const provider = new DeterministicPaymentProviderAdapter();
+    const app = await buildApp({
+      partnerKey: 'partner_demo',
+      partnerSecret,
+      now: () => fixedNow,
+      ledgerRepository: repository,
+      paymentProvider: provider,
+      demoMode: true,
+    });
+    const payload = { run_id: 'run_timeout001' };
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/timeout-recovery/run',
+      payload,
+    });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/timeout-recovery/run',
+      payload,
+    });
+    const recovered = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/timeout-recovery/recover',
+      payload,
+    });
+    const recoveredReplay = await app.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/timeout-recovery/recover',
+      payload,
+    });
+
+    expect(created.statusCode).toBe(201);
+    expect(created.json()).toMatchObject({
+      scenario: { key: 'timeout-recovery', amount_paise: 78_600 },
+      assessment: { decision: 'ALLOW' },
+      payment: { state: 'PENDING' },
+      provider_attempts: [
+        {
+          operation: 'SUBMIT',
+          status: 'UNKNOWN',
+          provider_status: 'PENDING',
+          response_code: 'TIMEOUT_UNKNOWN',
+        },
+      ],
+      recovery: {
+        resolved_at: null,
+      },
+    });
+    expect(replay.statusCode).toBe(200);
+    expect(replay.json().payment.payment_intent_id).toBe(created.json().payment.payment_intent_id);
+    expect(replay.json().provider_attempts).toHaveLength(1);
+    expect(recovered.statusCode).toBe(200);
+    expect(recovered.json().payment.state).toBe('SUCCEEDED');
+    expect(recovered.json().provider_attempts).toMatchObject([
+      { operation: 'SUBMIT', status: 'UNKNOWN' },
+      { operation: 'STATUS_INQUIRY', status: 'COMPLETED', provider_status: 'SUCCEEDED' },
+    ]);
+    expect(recovered.json().timeline.map((event: { to_state: string }) => event.to_state)).toEqual([
+      'CREATED',
+      'RISK_EVALUATING',
+      'ALLOWED',
+      'SUBMITTED',
+      'PENDING',
+      'SUCCEEDED',
+    ]);
+    expect(recovered.json().recovery).toMatchObject({
+      status_check_due_at: null,
+      resolved_at: fixedNow.toISOString(),
+    });
+    expect(recoveredReplay.statusCode).toBe(200);
+    expect(recoveredReplay.json().provider_attempts).toHaveLength(2);
+    expect(provider.submissionCount).toBe(1);
+    expect(provider.inquiryCount).toBe(1);
     await app.close();
   });
 

@@ -50,12 +50,16 @@ payments cannot cross the provider-submission state boundary.
 
 - `POST /v1/demo/scenarios/trusted-payment/run` runs only the fixed ₹249 trusted-merchant fixture.
 - `POST /v1/demo/scenarios/refund-collect/run` runs only the fixed deceptive refund collect fixture.
+- `POST /v1/demo/scenarios/timeout-recovery/run` submits the fixed accepted-timeout fixture once.
+- `POST /v1/demo/scenarios/timeout-recovery/recover` performs one status-first recovery pulse for
+  that fixed run. The production worker performs the same inquiry through the ledger service.
 - `GET /v1/demo/payments` returns recent durable demo snapshots for the operations console.
 - `GET /v1/demo/payments/{paymentId}` returns one immutable state/provider timeline.
 - `GET /v1/demo/cases` returns recent durable synthetic fraud cases and evidence.
 - `GET /v1/demo/cases/{caseId}` returns one immutable case timeline.
 
-These routes accept no payee, amount, provider scenario, tenant, or credential input. They are
+These routes accept no payee, amount, provider scenario, tenant, or credential input. Recovery is
+bound to the opaque run ID and the original provider reference. They are
 disabled by default and configuration validation rejects demo mode in production. Partner and
 provider APIs remain HMAC-authenticated; neither React bundle receives signing material. Local
 Vite servers proxy `/api` to the Fastify process so no permissive CORS policy is required.

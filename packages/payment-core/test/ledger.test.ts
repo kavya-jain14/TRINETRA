@@ -187,6 +187,38 @@ describe('payment ledger service', () => {
     ).toEqual(['SUBMIT', 'STATUS_INQUIRY']);
   });
 
+  it('preserves an accepted timeout as PENDING and resolves it without a second submit', async () => {
+    const { provider, repository, service } = buildHarness();
+    await createAllowedPayment(service);
+
+    const timedOut = await service.submitPayment(tenantA, 'pi_payment_001', 'TIMEOUT_THEN_SUCCESS');
+    const replay = await service.submitPayment(tenantA, 'pi_payment_001', 'TIMEOUT_THEN_SUCCESS');
+    const recovered = await service.inquirePendingPayment(
+      tenantA,
+      'pi_payment_001',
+      'timeout-recovery-001',
+    );
+
+    expect(timedOut.payment.state).toBe('PENDING');
+    expect(replay).toMatchObject({ outcome: 'DUPLICATE', payment: { state: 'PENDING' } });
+    expect(recovered.payment.state).toBe('SUCCEEDED');
+    expect(provider.submissionCount).toBe(1);
+    expect(provider.inquiryCount).toBe(1);
+    expect(await repository.listProviderAttempts(tenantA, 'pi_payment_001')).toMatchObject([
+      {
+        operation: 'SUBMIT',
+        status: 'UNKNOWN',
+        providerStatus: 'PENDING',
+        responseCode: 'TIMEOUT_UNKNOWN',
+      },
+      {
+        operation: 'STATUS_INQUIRY',
+        status: 'COMPLETED',
+        providerStatus: 'SUCCEEDED',
+      },
+    ]);
+  });
+
   it('recovers a crash window from SUBMITTED without blindly resubmitting', async () => {
     const { provider, repository, service } = buildHarness();
     await createAllowedPayment(service);

@@ -41,6 +41,10 @@
   background: color-mix(in srgb, var(--risk) 12%, transparent);
 }
 
+.scenario-switch button.pending-option.is-active {
+  background: color-mix(in srgb, var(--warning) 14%, transparent);
+}
+
 .payment-card {
   width: min(100%, 480px);
   padding: clamp(1.5rem, 5vw, 3rem);
@@ -51,8 +55,17 @@
   border-color: color-mix(in srgb, var(--risk), var(--line) 48%);
 }
 
+.payment-card.pending-flow {
+  border-color: color-mix(in srgb, var(--warning), var(--line) 48%);
+}
+
 .risk-flow .merchant-mark {
   background: color-mix(in srgb, var(--risk) 8%, var(--surface));
+}
+
+.pending-flow .merchant-mark {
+  background: color-mix(in srgb, var(--warning) 9%, var(--surface));
+  color: var(--warning);
 }
 
 .merchant-mark {
@@ -121,6 +134,28 @@
   color: #1c0508;
 }
 
+.payment-card .primary-action.pending-action {
+  background: var(--warning);
+  color: #201503;
+}
+
+.payment-card .secondary-action {
+  width: 100%;
+  margin-top: 0.65rem;
+  padding: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--warning), var(--line) 45%);
+  border-radius: 0.9rem;
+  background: transparent;
+  color: var(--warning);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.payment-card .secondary-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 .payment-card .primary-action:not(:disabled) {
   cursor: pointer;
 }
@@ -163,6 +198,21 @@
 .payment-result.is-blocked .status-dot {
   background: var(--risk);
   box-shadow: 0 0 16px var(--risk);
+}
+
+.payment-result.is-pending {
+  border-color: color-mix(in srgb, var(--warning), var(--line) 45%);
+  background: color-mix(in srgb, var(--warning) 7%, var(--surface));
+}
+
+.payment-result.is-pending .result-state,
+.recovery-explanation > strong {
+  color: var(--warning);
+}
+
+.payment-result.is-pending .status-dot {
+  background: var(--warning);
+  box-shadow: 0 0 16px var(--warning);
 }
 
 .safety-explanation {
@@ -230,6 +280,7 @@
 
   .scenario-switch {
     margin-top: 0.8rem;
+    overflow-x: auto;
   }
 
   .scenario-switch button {

@@ -27,4 +27,18 @@
    `CREATED → RISK_EVALUATING → BLOCKED` payment timeline.
 8. Retry the same run only when testing idempotency: the payment and case IDs must remain unchanged.
 
+## Timeout recovery checkpoint
+
+1. Select **Safe recovery** in the consumer demo and submit the fixed ₹786 utilities payment.
+2. Confirm the initial state is `PENDING`, not failed, with one `SUBMIT / UNKNOWN /
+TIMEOUT_UNKNOWN` provider attempt.
+3. Select **Retry same request safely** and confirm the payment ID is unchanged and the provider
+   submission count remains exactly one.
+4. Select **Run status-first recovery**. Confirm one `STATUS_INQUIRY` appears and the original
+   payment becomes `SUCCEEDED`.
+5. In operations, confirm the timeline is `CREATED → RISK_EVALUATING → ALLOWED → SUBMITTED →
+PENDING → SUCCEEDED`, the recovery clock is resolved, and no second `SUBMIT` exists.
+6. Refresh or repeat the recovery action: the terminal resource and two attempt records must remain
+   unchanged.
+
 Never imply that the demo accesses NPCI, a bank, a real UPI account, or a UPI PIN.

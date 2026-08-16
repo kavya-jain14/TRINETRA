@@ -17,6 +17,8 @@ UI shells, CI, and local infrastructure. Package 0B now adds:
 - a live fixed-scenario consumer journey and polling operations timeline backed by PostgreSQL;
 - tenant-scoped fraud cases with append-only evidence events and transactional `case.created` outbox delivery;
 - a deceptive refund collect journey that is blocked before the provider boundary and opens a live analyst case;
+- an accepted-but-timed-out payment journey that preserves one provider submission, exposes the
+  recovery clock, replays the original resource, and resolves through status inquiry;
 - repository, domain-property, API integration, and worker recovery tests. CI exercises the signed API against real PostgreSQL 17 and Redis 7.4 services, including cross-replica nonce replay rejection and active readiness checks.
 
 ## Quick start
@@ -41,10 +43,10 @@ Services:
 - Operations console: `http://localhost:5173`
 - Consumer demo: `http://localhost:5174`
 
-With `DEMO_MODE=true` in the local `.env`, open both React apps. Run either the fixed ₹249 trusted
-payment or the deceptive ₹1,999 refund-collect scenario from the consumer. The operations console
-polls the durable payment and case timelines. Partner HMAC material is never sent to either browser.
-Demo orchestration cannot be enabled when `NODE_ENV=production`.
+With `DEMO_MODE=true` in the local `.env`, open both React apps. Run the fixed ₹249 trusted payment,
+the deceptive ₹1,999 refund-collect request, or the ₹786 accepted-timeout recovery journey. The
+operations console polls the durable payment, recovery, and case timelines. Partner HMAC material
+is never sent to either browser. Demo orchestration cannot be enabled when `NODE_ENV=production`.
 
 Run the complete local quality gate with `pnpm verify`.
 
@@ -76,3 +78,16 @@ ordered three-lens evidence and immutable case/payment timelines.
 Case creation is tenant-scoped and idempotent. PostgreSQL commits the case, its `case.created`
 event, and the transactional outbox row together. A real-service integration test verifies that a
 second API replica can read the same case and evidence.
+
+## Third integration checkpoint
+
+Consumer demo submits one synthetic ₹786 utilities payment → the provider durably accepts it but
+the response times out → TRINETRA records `PENDING`, an `UNKNOWN` submit attempt, and a bounded
+recovery clock → repeating the same run returns the original payment with exactly one provider
+submission → a status-first recovery inquiry resolves the original provider reference to
+`SUCCEEDED`.
+
+The operations console exposes the submit/inquiry evidence and clock without turning `PENDING`
+into a retry instruction. The worker uses the same ledger service for scheduled recovery. A
+real-service integration test proves that another API replica can replay and recover the payment
+through the PostgreSQL-backed synthetic provider state.

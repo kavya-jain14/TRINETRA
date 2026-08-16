@@ -1140,6 +1140,7 @@ The team does not need a massive private banking dataset to prove the architectu
 The PSP sandbox can deterministically select:
 
 - `SUCCESS_IMMEDIATE`
+- `TIMEOUT_THEN_SUCCESS`
 - `PENDING_THEN_SUCCESS`
 - `PENDING_THEN_REVERSED`
 - `SOFT_DECLINE`
@@ -1889,6 +1890,12 @@ copy, and the operations console reads the live evidence and immutable timelines
 ### Third checkpoint
 
 > Provider timeout → `PENDING` → repeated request returns original payment → worker status check → late `SUCCEEDED` or `REVERSED` on the same timeline.
+
+Implementation status: Scenario E now persists provider acceptance before a synthetic timeout,
+returns the original `PENDING` resource on replay, and resolves `SUCCEEDED` through an inquiry on
+the bound provider reference. The worker's existing reversal path remains covered from `PENDING`
+through `REVERSAL_PENDING` to `REVERSED`; the recovery console renders the durable attempts and
+clocks without presenting `PENDING` as a retry instruction.
 
 ---
 

@@ -12,6 +12,9 @@ export const DemoRunRequestSchema = z
   .strict();
 export type DemoRunRequest = z.infer<typeof DemoRunRequestSchema>;
 
+export const DemoRecoveryRequestSchema = DemoRunRequestSchema;
+export type DemoRecoveryRequest = z.infer<typeof DemoRecoveryRequestSchema>;
+
 export const DemoScenarioSchema = z.discriminatedUnion('key', [
   z.object({
     key: z.literal('trusted-payment'),
@@ -28,6 +31,14 @@ export const DemoScenarioSchema = z.discriminatedUnion('key', [
     amount_paise: z.literal(199_900),
     direction: z.literal('COLLECT'),
     claimed_goal: z.literal('RECEIVE_REFUND'),
+  }),
+  z.object({
+    key: z.literal('timeout-recovery'),
+    label: z.literal('Provider timeout with safe recovery'),
+    counterparty_name: z.literal('Metro Utilities Demo'),
+    amount_paise: z.literal(78_600),
+    direction: z.literal('PUSH'),
+    claimed_goal: z.literal('PAY_MERCHANT'),
   }),
 ]);
 export type DemoScenario = z.infer<typeof DemoScenarioSchema>;
@@ -54,12 +65,23 @@ export const ProviderAttemptSummarySchema = z.object({
 });
 export type ProviderAttemptSummary = z.infer<typeof ProviderAttemptSummarySchema>;
 
+export const RecoveryClockSummarySchema = z.object({
+  status_check_due_at: z.string().datetime({ offset: true }).nullable(),
+  pending_expires_at: z.string().datetime({ offset: true }).nullable(),
+  reversal_due_at: z.string().datetime({ offset: true }).nullable(),
+  complaint_eligible_at: z.string().datetime({ offset: true }).nullable(),
+  resolved_at: z.string().datetime({ offset: true }).nullable(),
+  updated_at: z.string().datetime({ offset: true }),
+});
+export type RecoveryClockSummary = z.infer<typeof RecoveryClockSummarySchema>;
+
 export const DemoPaymentSnapshotSchema = z.object({
   scenario: DemoScenarioSchema,
   assessment: RiskAssessmentSchema,
   payment: PaymentResourceSchema,
   timeline: z.array(PaymentTimelineEventSchema),
   provider_attempts: z.array(ProviderAttemptSummarySchema),
+  recovery: RecoveryClockSummarySchema.nullable(),
   fraud_case: FraudCaseSnapshotSchema.nullable(),
 });
 export type DemoPaymentSnapshot = z.infer<typeof DemoPaymentSnapshotSchema>;
