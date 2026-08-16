@@ -383,6 +383,11 @@ describe('Postgres payment ledger repository', () => {
     );
 
     expect(recovered.payment.state).toBe('SUCCEEDED');
+    expect(
+      (await repository.listProviderAttempts(tenantA, 'pi_pg_payment_001')).map(
+        (attempt) => attempt.operation,
+      ),
+    ).toEqual(['SUBMIT', 'STATUS_INQUIRY']);
   });
 
   it('recovers a committed SUBMITTED attempt after a pre-provider crash', async () => {
