@@ -2,12 +2,16 @@ import {
   CASE_CATEGORIES,
   CASE_SEVERITIES,
   CASE_STATUSES,
+  GRAPH_NODE_KINDS,
+  GRAPH_RELATIONSHIPS,
   PAYMENT_STATES,
   PROVIDER_PAYMENT_STATUSES,
   RISK_DECISIONS,
 } from '@trinetra/contracts';
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   foreignKey,
   index,
   integer,
@@ -39,6 +43,9 @@ export const providerAttemptStatusEnum = pgEnum('provider_attempt_status', [
 export const caseStatusEnum = pgEnum('case_status', CASE_STATUSES);
 export const caseSeverityEnum = pgEnum('case_severity', CASE_SEVERITIES);
 export const caseCategoryEnum = pgEnum('case_category', CASE_CATEGORIES);
+export const graphNodeKindEnum = pgEnum('graph_node_kind', GRAPH_NODE_KINDS);
+export const graphRelationshipEnum = pgEnum('graph_relationship', GRAPH_RELATIONSHIPS);
+export const graphRiskLabelEnum = pgEnum('graph_risk_label', ['CONFIRMED_FRAUD']);
 
 export const tenants = pgTable('tenants', {
   id: uuid('id').primaryKey().defaultRandom(),
@@ -46,6 +53,59 @@ export const tenants = pgTable('tenants', {
   name: text('name').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const graphNodes = pgTable(
+  'graph_nodes',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    externalRef: text('external_ref').notNull(),
+    kind: graphNodeKindEnum('kind').notNull(),
+    label: text('label').notNull(),
+    riskLabel: graphRiskLabelEnum('risk_label'),
+    validUntil: timestamp('valid_until', { withTimezone: true }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (table) => [
+    uniqueIndex('graph_nodes_tenant_external_ref_unique').on(table.tenantId, table.externalRef),
+    uniqueIndex('graph_nodes_tenant_internal_id_unique').on(table.tenantId, table.id),
+    index('graph_nodes_tenant_kind_idx').on(table.tenantId, table.kind),
+  ],
+);
+
+export const graphEdges = pgTable(
+  'graph_edges',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    tenantId: uuid('tenant_id')
+      .notNull()
+      .references(() => tenants.id),
+    externalRef: text('external_ref').notNull(),
+    sourceNodeId: uuid('source_node_id').notNull(),
+    targetNodeId: uuid('target_node_id').notNull(),
+    relationship: graphRelationshipEnum('relationship').notNull(),
+    observedAt: timestamp('observed_at', { withTimezone: true }).notNull(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+  },
+  (table) => [
+    check('graph_edges_no_self_loop', sql`${table.sourceNodeId} <> ${table.targetNodeId}`),
+    foreignKey({
+      columns: [table.tenantId, table.sourceNodeId],
+      foreignColumns: [graphNodes.tenantId, graphNodes.id],
+      name: 'graph_edges_tenant_source_fk',
+    }),
+    foreignKey({
+      columns: [table.tenantId, table.targetNodeId],
+      foreignColumns: [graphNodes.tenantId, graphNodes.id],
+      name: 'graph_edges_tenant_target_fk',
+    }),
+    uniqueIndex('graph_edges_tenant_external_ref_unique').on(table.tenantId, table.externalRef),
+    index('graph_edges_tenant_source_idx').on(table.tenantId, table.sourceNodeId, table.observedAt),
+    index('graph_edges_tenant_target_idx').on(table.tenantId, table.targetNodeId, table.observedAt),
+  ],
+);
 
 export const paymentIntents = pgTable(
   'payment_intents',

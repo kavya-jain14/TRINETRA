@@ -8,6 +8,7 @@ import {
   ensureTenant,
   PostgresCaseRepository,
   PostgresDeterministicPaymentProviderAdapter,
+  PostgresGraphRepository,
   PostgresPaymentLedgerRepository,
 } from '@trinetra/database';
 import { canonicalJson, RedisNonceStore, signPartnerRequest } from '@trinetra/security';
@@ -90,6 +91,7 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
       now: () => fixedNow,
       ledgerRepository: repository,
       caseRepository,
+      graphRepository: new PostgresGraphRepository(pool),
       paymentProvider: new PostgresDeterministicPaymentProviderAdapter(pool),
       tenantId,
       trustedDeviceTokens: ['dev_tok_integration_trusted'],
@@ -323,5 +325,47 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
     expect(persisted.timeline).toEqual([
       expect.objectContaining({ event_type: 'case.created', resource_version: 1 }),
     ]);
+  });
+
+  it('persists tenant-scoped two-hop graph evidence across API replicas', async () => {
+    const primary = apps[0]!;
+    const replica = apps[1]!;
+    const runId = `run_${randomUUID().replaceAll('-', '')}`;
+
+    const blocked = await primary.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/mule-network/run',
+      payload: { run_id: runId },
+    });
+    const paymentId = blocked.json().payment.payment_intent_id as string;
+    const persisted = await replica.inject({
+      method: 'GET',
+      url: `/v1/demo/payments/${paymentId}`,
+    });
+
+    expect(blocked.statusCode).toBe(201);
+    expect(blocked.json()).toMatchObject({
+      assessment: { decision: 'BLOCK', reasons: [{ code: 'GRAPH_LINKED_DESTINATION' }] },
+      payment: { state: 'BLOCKED' },
+      provider_attempts: [],
+      graph: {
+        linked_confirmed_cases: 2,
+        minimum_hops: 2,
+        risk_contribution: 75,
+        truncated: false,
+      },
+    });
+    expect(persisted.statusCode).toBe(200);
+    expect(persisted.json().graph.nodes).toHaveLength(6);
+    expect(persisted.json().graph.edges).toHaveLength(5);
+    expect(persisted.json().timeline.at(-1).evidence.graph).toMatchObject({
+      destination_ref: 'vpa_tok_graph_destination_47',
+      linked_confirmed_cases: 2,
+      minimum_hops: 2,
+    });
+    expect(persisted.json().fraud_case).toMatchObject({
+      category: 'RISK_REVIEW',
+      evidence: [{ code: 'GRAPH_LINKED_DESTINATION', lens: 'INTEGRITY' }],
+    });
   });
 });

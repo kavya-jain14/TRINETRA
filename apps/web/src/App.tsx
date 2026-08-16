@@ -256,6 +256,74 @@ export function App() {
             </section>
           ) : null}
 
+          {selected.graph ? (
+            <section className="panel graph-panel" aria-labelledby="graph-title">
+              <div className="section-heading">
+                <div>
+                  <div className="eyebrow">Bounded network evidence</div>
+                  <h2 id="graph-title">Two hops, tenant-scoped, explainable.</h2>
+                </div>
+                <span className="graph-bound-chip">
+                  {selected.graph.nodes.length}/{250} nodes · {selected.graph.max_hops} hop max
+                </span>
+              </div>
+              <div className="graph-summary">
+                <article>
+                  <span>Confirmed synthetic cases</span>
+                  <strong>{selected.graph.linked_confirmed_cases}</strong>
+                </article>
+                <article>
+                  <span>Minimum distance</span>
+                  <strong>{selected.graph.minimum_hops ?? '—'} hops</strong>
+                </article>
+                <article>
+                  <span>Integrity contribution</span>
+                  <strong>+{selected.graph.risk_contribution}</strong>
+                </article>
+              </div>
+              <div className="graph-lanes" aria-label="Bounded graph topology">
+                {[0, 1, 2].map((depth) => (
+                  <div className="graph-lane" key={depth}>
+                    <span>HOP {depth}</span>
+                    <div>
+                      {selected.graph?.nodes
+                        .filter((node) => node.depth === depth)
+                        .map((node) => (
+                          <article
+                            className={
+                              node.risk_label === 'CONFIRMED_FRAUD'
+                                ? 'graph-node is-confirmed'
+                                : node.kind === 'DEVICE_CLUSTER'
+                                  ? 'graph-node is-cluster'
+                                  : 'graph-node'
+                            }
+                            key={node.node_ref}
+                          >
+                            <small>{node.kind.replaceAll('_', ' ')}</small>
+                            <strong>{node.label}</strong>
+                            <code>{node.node_ref}</code>
+                          </article>
+                        ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              <div className="graph-edge-list" role="list" aria-label="Graph relationships">
+                {selected.graph.edges.map((edge) => (
+                  <div role="listitem" key={edge.edge_ref}>
+                    <code>{edge.source_ref}</code>
+                    <strong>{edge.relationship.replaceAll('_', ' ')}</strong>
+                    <code>{edge.target_ref}</code>
+                  </div>
+                ))}
+              </div>
+              <p className="graph-disclaimer">
+                Graph proximity is a bounded risk signal, not proof of guilt. This view contains
+                fixed synthetic, tokenised references only; no raw UPI identifier is exposed.
+              </p>
+            </section>
+          ) : null}
+
           {selected.recovery ? (
             <section className="panel recovery-panel" aria-labelledby="recovery-title">
               <div className="section-heading">
@@ -339,7 +407,9 @@ export function App() {
                       ? 'Timeout without duplicate debit'
                       : selected.scenario.key === 'reversal-recovery'
                         ? 'Merchant confirmation gap to durable reversal'
-                        : 'Golden payment checkpoint'}
+                        : selected.scenario.key === 'mule-network'
+                          ? 'Graph risk blocked before provider boundary'
+                          : 'Golden payment checkpoint'}
                 </h2>
               </div>
               <span className="contract-chip">

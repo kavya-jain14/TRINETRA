@@ -16,6 +16,7 @@
     "@trinetra/config": "workspace:*",
     "@trinetra/contracts": "workspace:*",
     "@trinetra/database": "workspace:*",
+    "@trinetra/graph-core": "workspace:*",
     "@trinetra/observability": "workspace:*",
     "@trinetra/payment-core": "workspace:*",
     "@trinetra/risk-core": "workspace:*",

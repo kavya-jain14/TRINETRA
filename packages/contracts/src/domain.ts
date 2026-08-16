@@ -39,6 +39,7 @@ export const RiskReasonCodeSchema = z.enum([
   'REFUND_COLLECT_CONFLICT',
   'PAYEE_MERCHANT_MISMATCH',
   'REMOTE_ACCESS_ACTIVE',
+  'GRAPH_EVIDENCE_TRUNCATED',
   'GRAPH_LINKED_DESTINATION',
 ]);
 export type RiskReasonCode = z.infer<typeof RiskReasonCodeSchema>;

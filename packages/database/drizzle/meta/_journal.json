@@ -29,6 +29,13 @@
       "when": 1786818607420,
       "tag": "0003_third_warstar",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786906386918,
+      "tag": "0004_bounded_graph_risk",
+      "breakpoints": true
     }
   ]
 }

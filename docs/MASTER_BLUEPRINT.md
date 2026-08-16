@@ -1909,6 +1909,19 @@ recovery is a no-op. Consumer and operations views show the do-not-pay-again ins
 evidence, and clearly labelled accelerated clocks. The partner bank or PSP—not TRINETRA—remains
 responsible for the actual reversal and applicable regulatory timeline.
 
+### Fifth checkpoint
+
+> Tokenised destination → tenant-scoped two-hop graph → shared-device cluster → two confirmed
+> synthetic cases → NETRA-III 92 / `BLOCK` → zero provider submissions → explainable analyst case.
+
+Implementation status: Scenario D now persists graph nodes and relationships in PostgreSQL and
+evaluates them through the same risk, payment, and case boundaries as partner traffic. Traversal is
+limited to two hops, 250 returned nodes, 500 eligible edges, and a 90-day evidence window; expired
+intermediate nodes cannot propagate risk. The fixed ₹649 Orchid Supplies Demo fixture contributes
+75 graph-risk points, opens a `HIGH / RISK_REVIEW` case, and exposes a bounded topology in operations.
+Token text alone never creates risk, raw VPAs are not exposed, and the UI states that association is
+a signal rather than proof of guilt.
+
 ---
 
 ## 29. Locked decisions summary

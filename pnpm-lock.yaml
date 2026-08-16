@@ -64,6 +64,9 @@ importers:
       '@trinetra/database':
         specifier: workspace:*
         version: link:../../packages/database
+      '@trinetra/graph-core':
+        specifier: workspace:*
+        version: link:../../packages/graph-core
       '@trinetra/observability':
         specifier: workspace:*
         version: link:../../packages/observability
@@ -273,6 +276,9 @@ importers:
       '@trinetra/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@trinetra/graph-core':
+        specifier: workspace:*
+        version: link:../graph-core
       '@trinetra/payment-core':
         specifier: workspace:*
         version: link:../payment-core
@@ -297,10 +303,17 @@ importers:
         version: 6.0.3
 
   packages/graph-core:
+    dependencies:
+      '@trinetra/contracts':
+        specifier: workspace:*
+        version: link:../contracts
     devDependencies:
       typescript:
         specifier: 'catalog:'
         version: 6.0.3
+      vitest:
+        specifier: 'catalog:'
+        version: 4.1.10(@types/node@26.2.0)(vite@8.2.1(@types/node@26.2.0)(esbuild@0.28.2)(tsx@4.23.12))
 
   packages/observability:
     dependencies:

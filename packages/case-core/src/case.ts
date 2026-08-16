@@ -97,6 +97,11 @@ const evidenceDefinition: Readonly<
     analyst_detail: 'Partner context reports an active remote-control or screen-sharing session.',
     evidence_ref: 'device:remote_access_active',
   },
+  GRAPH_EVIDENCE_TRUNCATED: {
+    lens: 'INTEGRITY',
+    analyst_detail: 'Bounded graph traversal reached its configured node or edge review limit.',
+    evidence_ref: 'graph:traversal_truncated',
+  },
   GRAPH_LINKED_DESTINATION: {
     lens: 'INTEGRITY',
     analyst_detail: 'Tokenised destination is linked to a bounded synthetic risk cluster.',
@@ -133,6 +138,7 @@ export class CaseService {
     if (evidence.length === 0) throw new Error('A BLOCK assessment must contain case evidence.');
 
     const refundCollect = evidence.some((item) => item.code === 'REFUND_COLLECT_CONFLICT');
+    const graphLinked = evidence.some((item) => item.code === 'GRAPH_LINKED_DESTINATION');
     const socialEngineering =
       refundCollect || evidence.some((item) => item.code === 'REMOTE_ACCESS_ACTIVE');
     return await this.#repository.ensureCase({
@@ -145,7 +151,9 @@ export class CaseService {
         ? 'Deceptive refund collect request blocked before provider submission.'
         : socialEngineering
           ? 'High-risk social-engineering context blocked before provider submission.'
-          : 'Blocked payment requires analyst review.',
+          : graphLinked
+            ? 'Graph-linked destination blocked for bounded analyst review.'
+            : 'Blocked payment requires analyst review.',
       evidence,
       now: this.#now(),
     });

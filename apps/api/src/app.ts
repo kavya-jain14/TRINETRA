@@ -2,6 +2,11 @@ import Fastify, { type FastifyInstance } from 'fastify';
 
 import { CaseService, InMemoryCaseRepository, type CaseRepository } from '@trinetra/case-core';
 import { openApiDocument } from '@trinetra/contracts';
+import {
+  GraphRiskService,
+  InMemoryGraphRepository,
+  type GraphRepository,
+} from '@trinetra/graph-core';
 import { createLoggerOptions } from '@trinetra/observability';
 import {
   DeterministicPaymentProviderAdapter,
@@ -27,6 +32,7 @@ export interface AppConfig {
   nonceStore?: NonceStore;
   ledgerRepository?: PaymentLedgerRepository;
   caseRepository?: CaseRepository;
+  graphRepository?: GraphRepository;
   paymentProvider?: PaymentProviderAdapter;
   tenantId?: string;
   providerCallbackSecret?: string;
@@ -47,6 +53,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
   const nonceStore = config.nonceStore ?? new InMemoryNonceStore();
   const repository = config.ledgerRepository ?? new InMemoryPaymentLedgerRepository();
   const caseRepository = config.caseRepository ?? new InMemoryCaseRepository();
+  const graphRepository = config.graphRepository ?? new InMemoryGraphRepository();
   const provider = config.paymentProvider ?? new DeterministicPaymentProviderAdapter();
   const ledgerService = new PaymentLedgerService({
     repository,
@@ -54,6 +61,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     now,
   });
   const caseService = new CaseService(caseRepository, now);
+  const graphService = new GraphRiskService(graphRepository);
   const tenantId = config.tenantId ?? defaultTenantId;
   const trustedDeviceTokens = new Set(config.trustedDeviceTokens ?? ['dev_tok_trusted']);
 
@@ -70,6 +78,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
     clockSkewSeconds: 300,
     ledgerService,
     caseService,
+    graphService,
     tenantId,
     isTrustedDeviceToken: (deviceToken) => trustedDeviceTokens.has(deviceToken),
   });
@@ -89,6 +98,7 @@ export async function buildApp(config: AppConfig): Promise<FastifyInstance> {
       repository,
       caseService,
       caseRepository,
+      graphService,
       tenantId,
       now,
     });

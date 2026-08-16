@@ -243,6 +243,142 @@ h2 {
   border-color: color-mix(in srgb, var(--risk), var(--line) 58%);
 }
 
+.graph-panel {
+  margin-top: 1rem;
+  padding: clamp(1.25rem, 3vw, 2.2rem);
+  border-color: color-mix(in srgb, #9b8cff, var(--line) 55%);
+}
+
+.graph-bound-chip {
+  padding: 0.45rem 0.7rem;
+  border: 1px solid #9b8cff;
+  border-radius: 999px;
+  color: #bdb4ff;
+  font-size: 0.72rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.graph-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.graph-summary article {
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 0.8rem;
+  background: color-mix(in srgb, #9b8cff 6%, transparent);
+}
+
+.graph-summary span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.graph-summary strong {
+  display: block;
+  margin-top: 0.55rem;
+  color: #bdb4ff;
+  font-size: 1.5rem;
+}
+
+.graph-lanes {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.graph-lane > span {
+  display: block;
+  margin-bottom: 0.55rem;
+  color: var(--muted);
+  font-size: 0.65rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.graph-lane > div {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.graph-node {
+  min-width: 0;
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  background: var(--surface);
+}
+
+.graph-node.is-cluster {
+  border-color: #9b8cff;
+}
+
+.graph-node.is-confirmed {
+  border-color: var(--risk);
+  background: color-mix(in srgb, var(--risk) 7%, var(--surface));
+}
+
+.graph-node small,
+.graph-node code {
+  display: block;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-node strong {
+  display: block;
+  margin: 0.35rem 0;
+  font-size: 0.78rem;
+}
+
+.graph-edge-list {
+  margin-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+.graph-edge-list > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.68rem;
+}
+
+.graph-edge-list code {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.graph-edge-list code:last-child {
+  text-align: right;
+}
+
+.graph-edge-list strong {
+  color: #bdb4ff;
+  font-size: 0.65rem;
+}
+
+.graph-disclaimer {
+  margin: 1rem 0 0;
+  padding-left: 1rem;
+  border-left: 3px solid #9b8cff;
+  color: var(--muted);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
 .recovery-panel {
   margin-top: 1rem;
   padding: clamp(1.25rem, 3vw, 2.2rem);
@@ -437,6 +573,11 @@ h2 {
   }
 
   .recovery-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .graph-summary,
+  .graph-lanes {
     grid-template-columns: 1fr;
   }
 

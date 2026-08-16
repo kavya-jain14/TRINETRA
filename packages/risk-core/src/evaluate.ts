@@ -11,6 +11,12 @@ export interface EvaluationContext {
   traceId: string;
   deviceTrust: 'TRUSTED' | 'UNKNOWN';
   beneficiaryTrust?: 'KNOWN' | 'NEW';
+  graphRisk?: {
+    linkedConfirmedCases: number;
+    minimumHops: number | null;
+    contribution: number;
+    truncated: boolean;
+  };
 }
 
 type EvaluationResult = Omit<RiskAssessment, 'resource_version'> & { resource_version: 1 };
@@ -22,6 +28,8 @@ const userMessages = {
   REFUND_COLLECT_CONFLICT: 'A collect request sends money; it does not receive a refund.',
   PAYEE_MERCHANT_MISMATCH: 'The receiver does not match the selected merchant.',
   REMOTE_ACCESS_ACTIVE: 'Screen sharing or remote access is active during this payment.',
+  GRAPH_EVIDENCE_TRUNCATED:
+    'The network check reached its safe review limit; confirm the receiver before continuing.',
   GRAPH_LINKED_DESTINATION: 'The destination is linked to a reported synthetic risk cluster.',
 } as const;
 
@@ -108,11 +116,20 @@ export function evaluatePaymentIntent(
     });
   }
 
-  if (input.beneficiary.vpa_token.includes('mule')) {
+  if (context.graphRisk?.truncated) {
+    integrity = Math.max(integrity, 68);
+    reasons.push({
+      code: 'GRAPH_EVIDENCE_TRUNCATED',
+      impact: 35,
+      user_message: userMessages.GRAPH_EVIDENCE_TRUNCATED,
+    });
+  }
+
+  if (context.graphRisk && context.graphRisk.linkedConfirmedCases > 0) {
     integrity = Math.max(integrity, 92);
     reasons.push({
       code: 'GRAPH_LINKED_DESTINATION',
-      impact: 75,
+      impact: Math.min(75, context.graphRisk.contribution),
       user_message: userMessages.GRAPH_LINKED_DESTINATION,
     });
   }
