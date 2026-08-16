@@ -1897,6 +1897,18 @@ the bound provider reference. The worker's existing reversal path remains covere
 through `REVERSAL_PENDING` to `REVERSED`; the recovery console renders the durable attempts and
 clocks without presenting `PENDING` as a retry instruction.
 
+### Fourth checkpoint
+
+> Merchant confirmation missing after debit acknowledgement → `PENDING` → status-first
+> `REVERSAL_PENDING` → accelerated policy/complaint clock → status-first `REVERSED`, with one
+> submission throughout.
+
+Implementation status: Scenario F now binds a fixed synthetic ₹425 merchant payment to one provider
+reference. Two distinct, idempotent inquiry pulses produce the complete durable timeline; terminal
+recovery is a no-op. Consumer and operations views show the do-not-pay-again instruction, one-submit
+evidence, and clearly labelled accelerated clocks. The partner bank or PSP—not TRINETRA—remains
+responsible for the actual reversal and applicable regulatory timeline.
+
 ---
 
 ## 29. Locked decisions summary

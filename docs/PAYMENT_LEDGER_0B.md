@@ -66,6 +66,11 @@ Permanent `4xx` contract failures stop automatic retry and remain visible for op
 synthetic sandbox exposes `POST /v1/partner-events` as a signature-verifying, deduplicating local
 receiver.
 
+The fixed reversal demo exercises the same path without a second debit: the provider begins at
+`PENDING`, distinct idempotent status pulses advance to `REVERSAL_PENDING` and `REVERSED`, and a
+terminal pulse is a no-op. Its 30/120-second reversal and complaint timestamps are accelerated
+prototype clocks, not changes to bank responsibility or applicable real-world timelines.
+
 ## API and callback security
 
 Partner writes and provider callbacks are HMAC-SHA256 signed over method, actual path, timestamp,

@@ -41,4 +41,20 @@ PENDING → SUCCEEDED`, the recovery clock is resolved, and no second `SUBMIT` e
 6. Refresh or repeat the recovery action: the terminal resource and two attempt records must remain
    unchanged.
 
+## Reversal watch checkpoint
+
+1. Select **Reversal watch** and submit the fixed ₹425 Harbor Cafe Demo payment.
+2. Confirm `PENDING` with exactly one `SUBMIT / COMPLETED / PENDING` attempt. The consumer must say
+   not to pay again.
+3. Select **Start reversal monitoring**. Confirm `REVERSAL_PENDING`, one `STATUS_INQUIRY`, and
+   populated reversal/complaint timestamps labelled as accelerated demo clocks.
+4. Select **Confirm reversal on original reference**. Confirm `REVERSED`, two status inquiries, and
+   still exactly one provider submission.
+5. In operations, confirm `CREATED → RISK_EVALUATING → ALLOWED → SUBMITTED → PENDING →
+REVERSAL_PENDING → REVERSED`, with the original provider reference and resolved recovery clock.
+6. Repeat the terminal recovery call. Payment version, timeline, and three provider attempts must
+   remain unchanged.
+7. State the boundary accurately: the partner bank or PSP executes the actual reversal under the
+   applicable timeline; TRINETRA monitors it and the prototype clock is accelerated.
+
 Never imply that the demo accesses NPCI, a bank, a real UPI account, or a UPI PIN.

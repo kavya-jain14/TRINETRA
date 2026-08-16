@@ -101,6 +101,30 @@ const timeoutRecoveryIntent = {
   },
 } as const satisfies PaymentIntentRequest;
 
+const reversalRecoveryIntent = {
+  partner_customer_ref: 'cust_demo_104',
+  direction: 'PUSH',
+  payment_type: 'P2M',
+  amount_paise: 42_500,
+  currency: 'INR',
+  beneficiary: {
+    vpa_token: 'vpa_tok_harbor_cafe_demo',
+    resolved_name: 'Harbor Cafe Demo',
+  },
+  merchant: {
+    merchant_ref: 'm_demo_harbor_09',
+    expected_name: 'Harbor Cafe Demo',
+    mcc: '5812',
+  },
+  context: {
+    channel: 'UPI_INTENT',
+    device_token: 'dev_tok_trusted',
+    session_ref: 'sess_demo_reversal_recovery',
+    user_claimed_goal: 'PAY_MERCHANT',
+    remote_access_active: false,
+  },
+} as const satisfies PaymentIntentRequest;
+
 const scenarios = {
   'trusted-payment': {
     key: 'trusted-payment',
@@ -123,6 +147,14 @@ const scenarios = {
     label: 'Provider timeout with safe recovery',
     counterparty_name: 'Metro Utilities Demo',
     amount_paise: 78_600,
+    direction: 'PUSH',
+    claimed_goal: 'PAY_MERCHANT',
+  },
+  'reversal-recovery': {
+    key: 'reversal-recovery',
+    label: 'Merchant confirmation missing with safe reversal',
+    counterparty_name: 'Harbor Cafe Demo',
+    amount_paise: 42_500,
     direction: 'PUSH',
     claimed_goal: 'PAY_MERCHANT',
   },
@@ -177,6 +209,7 @@ function scenarioKeyFor(payment: PaymentIntentRecord): ScenarioKey | null {
   if (payment.idempotencyKey.startsWith('demo:trusted-payment:')) return 'trusted-payment';
   if (payment.idempotencyKey.startsWith('demo:refund-collect:')) return 'refund-collect';
   if (payment.idempotencyKey.startsWith('demo:timeout-recovery:')) return 'timeout-recovery';
+  if (payment.idempotencyKey.startsWith('demo:reversal-recovery:')) return 'reversal-recovery';
   return null;
 }
 
@@ -251,12 +284,13 @@ async function paymentSnapshot(config: DemoRouteConfig, payment: PaymentIntentRe
 }
 
 async function runScenario(config: DemoRouteConfig, scenarioKey: ScenarioKey, runId: string) {
-  const intent: PaymentIntentRequest =
-    scenarioKey === 'trusted-payment'
-      ? trustedPaymentIntent
-      : scenarioKey === 'refund-collect'
-        ? refundCollectIntent
-        : timeoutRecoveryIntent;
+  const intents: Readonly<Record<ScenarioKey, PaymentIntentRequest>> = {
+    'trusted-payment': trustedPaymentIntent,
+    'refund-collect': refundCollectIntent,
+    'timeout-recovery': timeoutRecoveryIntent,
+    'reversal-recovery': reversalRecoveryIntent,
+  };
+  const intent = intents[scenarioKey];
   const paymentId = paymentIdFor(`${scenarioKey}:${runId}`);
   const evaluated = RiskAssessmentSchema.parse(
     evaluatePaymentIntent(intent, {
@@ -290,7 +324,11 @@ async function runScenario(config: DemoRouteConfig, scenarioKey: ScenarioKey, ru
   let payment = created.payment;
   if (scenarioKey !== 'refund-collect' && payment.state === 'ALLOWED') {
     const providerScenario =
-      scenarioKey === 'trusted-payment' ? 'SUCCESS_IMMEDIATE' : 'TIMEOUT_THEN_SUCCESS';
+      scenarioKey === 'trusted-payment'
+        ? 'SUCCESS_IMMEDIATE'
+        : scenarioKey === 'timeout-recovery'
+          ? 'TIMEOUT_THEN_SUCCESS'
+          : 'PENDING_THEN_REVERSED';
     const submitted = await config.ledgerService.submitPayment(
       config.tenantId,
       payment.id,
@@ -309,10 +347,16 @@ async function runScenario(config: DemoRouteConfig, scenarioKey: ScenarioKey, ru
   } as const;
 }
 
-async function recoverTimeoutScenario(config: DemoRouteConfig, runId: string) {
-  const paymentId = paymentIdFor(`timeout-recovery:${runId}`);
+type RecoveryScenarioKey = 'timeout-recovery' | 'reversal-recovery';
+
+async function recoverScenario(
+  config: DemoRouteConfig,
+  scenarioKey: RecoveryScenarioKey,
+  runId: string,
+) {
+  const paymentId = paymentIdFor(`${scenarioKey}:${runId}`);
   let payment = await config.repository.getPayment(config.tenantId, paymentId);
-  if (!payment || scenarioKeyFor(payment) !== 'timeout-recovery') return null;
+  if (!payment || scenarioKeyFor(payment) !== scenarioKey) return null;
 
   if (
     payment.state === 'SUBMITTED' ||
@@ -322,7 +366,7 @@ async function recoverTimeoutScenario(config: DemoRouteConfig, runId: string) {
     const recovered = await config.ledgerService.inquirePendingPayment(
       config.tenantId,
       payment.id,
-      `demo-status-${payment.id.slice(-16)}`,
+      `demo-status-${payment.id.slice(-16)}-${payment.state.toLowerCase()}`,
     );
     payment = recovered.payment;
   }
@@ -344,7 +388,12 @@ export async function registerDemoRoutes(
   app: FastifyInstance,
   config: DemoRouteConfig,
 ): Promise<void> {
-  for (const scenarioKey of ['trusted-payment', 'refund-collect', 'timeout-recovery'] as const) {
+  for (const scenarioKey of [
+    'trusted-payment',
+    'refund-collect',
+    'timeout-recovery',
+    'reversal-recovery',
+  ] as const) {
     app.post(`/v1/demo/scenarios/${scenarioKey}/run`, async (request, reply) => {
       const parsed = DemoRunRequestSchema.safeParse(request.body);
       if (!parsed.success) {
@@ -355,25 +404,27 @@ export async function registerDemoRoutes(
     });
   }
 
-  app.post('/v1/demo/scenarios/timeout-recovery/recover', async (request, reply) => {
-    const parsed = DemoRecoveryRequestSchema.safeParse(request.body);
-    if (!parsed.success) {
-      return reply
-        .code(400)
-        .send(validationError(request.id, 'Demo recovery run identifier is invalid.'));
-    }
-    const snapshot = await recoverTimeoutScenario(config, parsed.data.run_id);
-    if (!snapshot) {
-      return reply.code(404).send({
-        error: {
-          code: 'NOT_FOUND',
-          message: 'Run the timeout recovery scenario before requesting a status check.',
-          trace_id: `tr_${request.id}`,
-        },
-      });
-    }
-    return reply.code(200).send(snapshot);
-  });
+  for (const scenarioKey of ['timeout-recovery', 'reversal-recovery'] as const) {
+    app.post(`/v1/demo/scenarios/${scenarioKey}/recover`, async (request, reply) => {
+      const parsed = DemoRecoveryRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
+        return reply
+          .code(400)
+          .send(validationError(request.id, 'Demo recovery run identifier is invalid.'));
+      }
+      const snapshot = await recoverScenario(config, scenarioKey, parsed.data.run_id);
+      if (!snapshot) {
+        return reply.code(404).send({
+          error: {
+            code: 'NOT_FOUND',
+            message: `Run the ${scenarioKey} scenario before requesting a status check.`,
+            trace_id: `tr_${request.id}`,
+          },
+        });
+      }
+      return reply.code(200).send(snapshot);
+    });
+  }
 
   app.get('/v1/demo/payments', async (request, reply) => {
     const parsed = DemoListQuerySchema.safeParse(request.query);

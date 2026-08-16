@@ -53,6 +53,10 @@ payments cannot cross the provider-submission state boundary.
 - `POST /v1/demo/scenarios/timeout-recovery/run` submits the fixed accepted-timeout fixture once.
 - `POST /v1/demo/scenarios/timeout-recovery/recover` performs one status-first recovery pulse for
   that fixed run. The production worker performs the same inquiry through the ledger service.
+- `POST /v1/demo/scenarios/reversal-recovery/run` submits the fixed ₹425
+  merchant-confirmation-missing fixture once.
+- `POST /v1/demo/scenarios/reversal-recovery/recover` advances one status-first pulse from
+  `PENDING` to `REVERSAL_PENDING`, then to `REVERSED`; terminal calls are read-only replays.
 - `GET /v1/demo/payments` returns recent durable demo snapshots for the operations console.
 - `GET /v1/demo/payments/{paymentId}` returns one immutable state/provider timeline.
 - `GET /v1/demo/cases` returns recent durable synthetic fraud cases and evidence.
@@ -63,6 +67,10 @@ bound to the opaque run ID and the original provider reference. They are
 disabled by default and configuration validation rejects demo mode in production. Partner and
 provider APIs remain HMAC-authenticated; neither React bundle receives signing material. Local
 Vite servers proxy `/api` to the Fastify process so no permissive CORS policy is required.
+
+Reversal timestamps are accelerated synthetic demo clocks. They visualize the T+5/complaint
+policy workflow without claiming that TRINETRA executes a bank reversal or changes the applicable
+real-world timeline.
 
 The demo case reads return only synthetic `pi_demo_*`/`case_demo_*` aggregates. Evidence references
 are bounded, tokenised categories such as `device:remote_access_active`; they never contain a raw

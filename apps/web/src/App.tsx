@@ -98,6 +98,7 @@ export function App() {
     selected?.provider_attempts.filter((attempt) => attempt.operation === 'SUBMIT') ?? [];
   const statusInquiries =
     selected?.provider_attempts.filter((attempt) => attempt.operation === 'STATUS_INQUIRY') ?? [];
+  const reversalRecovery = selected?.scenario.key === 'reversal-recovery';
 
   return (
     <main className="app-shell command-center">
@@ -125,7 +126,8 @@ export function App() {
               className={
                 selected.assessment.decision === 'BLOCK'
                   ? 'panel decision-card decision-blocked'
-                  : selected.payment.state === 'PENDING'
+                  : selected.payment.state === 'PENDING' ||
+                      selected.payment.state === 'REVERSAL_PENDING'
                     ? 'panel decision-card decision-pending'
                     : 'panel decision-card'
               }
@@ -268,7 +270,11 @@ export function App() {
                       : 'recovery-state is-pending'
                   }
                 >
-                  {selected.recovery.resolved_at ? 'RESOLVED' : 'MONITORING'}
+                  {selected.payment.state === 'REVERSAL_PENDING'
+                    ? 'REVERSAL WATCH'
+                    : selected.recovery.resolved_at
+                      ? 'RESOLVED'
+                      : 'MONITORING'}
                 </span>
               </div>
               <div className="recovery-metrics">
@@ -283,19 +289,32 @@ export function App() {
                   <small>Original provider reference</small>
                 </article>
                 <article>
-                  <span>Next status check</span>
+                  <span>
+                    {reversalRecovery ? 'Accelerated T+5 demo clock' : 'Next status check'}
+                  </span>
                   <strong>
-                    {selected.recovery.status_check_due_at
-                      ? formatTime(selected.recovery.status_check_due_at)
-                      : 'Complete'}
+                    {reversalRecovery && selected.recovery.reversal_due_at
+                      ? formatTime(selected.recovery.reversal_due_at)
+                      : selected.recovery.status_check_due_at
+                        ? formatTime(selected.recovery.status_check_due_at)
+                        : 'Complete'}
                   </strong>
                   <small>
-                    {selected.recovery.pending_expires_at
-                      ? `Pending bound ${formatTime(selected.recovery.pending_expires_at)}`
-                      : 'No active pending clock'}
+                    {reversalRecovery && selected.recovery.complaint_eligible_at
+                      ? `Complaint demo eligibility ${formatTime(selected.recovery.complaint_eligible_at)}`
+                      : selected.recovery.pending_expires_at
+                        ? `Pending bound ${formatTime(selected.recovery.pending_expires_at)}`
+                        : 'No active pending clock'}
                   </small>
                 </article>
               </div>
+              {reversalRecovery ? (
+                <p className="recovery-policy-note">
+                  Prototype visualization uses an accelerated policy clock. The partner bank or PSP
+                  remains responsible for the actual reversal and applicable regulatory timeline;
+                  TRINETRA only monitors the original reference.
+                </p>
+              ) : null}
               <div className="attempt-list" role="list">
                 {selected.provider_attempts.map((attempt) => (
                   <div className="attempt-row" role="listitem" key={attempt.attempt_id}>
@@ -318,7 +337,9 @@ export function App() {
                     ? 'Blocked before provider boundary'
                     : selected.scenario.key === 'timeout-recovery'
                       ? 'Timeout without duplicate debit'
-                      : 'Golden payment checkpoint'}
+                      : selected.scenario.key === 'reversal-recovery'
+                        ? 'Merchant confirmation gap to durable reversal'
+                        : 'Golden payment checkpoint'}
                 </h2>
               </div>
               <span className="contract-chip">

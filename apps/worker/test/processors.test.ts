@@ -105,9 +105,19 @@ describe('recovery processors', () => {
       },
       dependencies,
     );
+    const terminalReplay = await processRecoveryJob(
+      {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'STATUS_CHECK',
+        recoveryKey: 'reversal-status-terminal',
+      },
+      dependencies,
+    );
 
     expect(first).toEqual({ outcome: 'STATUS_CHECKED', state: 'REVERSAL_PENDING' });
     expect(second).toEqual({ outcome: 'STATUS_CHECKED', state: 'REVERSED' });
+    expect(terminalReplay).toEqual({ outcome: 'NOOP', state: 'REVERSED' });
     expect(harness.provider.submissionCount).toBe(1);
     expect(harness.provider.inquiryCount).toBe(2);
   });

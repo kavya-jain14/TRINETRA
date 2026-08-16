@@ -2,12 +2,20 @@ import { useState } from 'react';
 
 import type { DemoPaymentSnapshot, DemoScenario } from '@trinetra/contracts';
 
-import { recoverTimeoutScenario, runDemoScenario } from './demo-api';
+import { recoverDemoScenario, runDemoScenario } from './demo-api';
 
 type ScenarioKey = DemoScenario['key'];
 
 function nextRunId(): string {
   return `run_${crypto.randomUUID().replaceAll('-', '')}`;
+}
+
+function formatClock(value: string): string {
+  return new Intl.DateTimeFormat('en-IN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).format(new Date(value));
 }
 
 const journey = {
@@ -44,6 +52,17 @@ const journey = {
       ['Recovery rule', 'Check status · never pay twice'],
     ],
   },
+  'reversal-recovery': {
+    eyebrow: 'Merchant confirmation missing',
+    counterparty: 'Harbor Cafe Demo',
+    amount: '₹425',
+    mark: 'HC',
+    facts: [
+      ['Debit signal', 'Acknowledged in synthetic fixture'],
+      ['Merchant confirmation', 'Missing · do not pay again'],
+      ['Recovery rule', 'Track original reference to reversal'],
+    ],
+  },
 } as const;
 
 export function App() {
@@ -58,7 +77,11 @@ export function App() {
   const selected = journey[scenario];
   const blocked = snapshot?.assessment.decision === 'BLOCK';
   const pending = snapshot?.payment.state === 'PENDING';
+  const reversalPending = snapshot?.payment.state === 'REVERSAL_PENDING';
   const timeoutFlow = scenario === 'timeout-recovery';
+  const reversalFlow = scenario === 'reversal-recovery';
+  const recoveryFlow = timeoutFlow || reversalFlow;
+  const recoverable = pending || reversalPending;
 
   function reset(nextScenario = scenario) {
     setScenario(nextScenario);
@@ -80,7 +103,7 @@ export function App() {
     try {
       const result = await runDemoScenario(scenario, runId);
       setSnapshot(result);
-      if (snapshot && timeoutFlow) setReplayConfirmed(true);
+      if (snapshot && recoveryFlow) setReplayConfirmed(true);
       setStatus('completed');
     } catch (caught) {
       setStatus('failed');
@@ -89,10 +112,11 @@ export function App() {
   }
 
   async function recoverJourney() {
+    if (scenario !== 'timeout-recovery' && scenario !== 'reversal-recovery') return;
     setStatus('recovering');
     setError(null);
     try {
-      setSnapshot(await recoverTimeoutScenario(runId));
+      setSnapshot(await recoverDemoScenario(scenario, runId));
       setStatus('completed');
     } catch (caught) {
       setStatus('failed');
@@ -128,6 +152,15 @@ export function App() {
           >
             Safe recovery
           </button>
+          <button
+            type="button"
+            className={
+              scenario === 'reversal-recovery' ? 'is-active pending-option' : 'pending-option'
+            }
+            onClick={() => reset('reversal-recovery')}
+          >
+            Reversal watch
+          </button>
         </div>
       </div>
 
@@ -135,7 +168,7 @@ export function App() {
         className={
           scenario === 'refund-collect'
             ? 'panel payment-card risk-flow'
-            : timeoutFlow
+            : recoveryFlow
               ? 'panel payment-card pending-flow'
               : 'panel payment-card'
         }
@@ -162,7 +195,7 @@ export function App() {
             className={
               blocked
                 ? 'payment-result is-blocked'
-                : pending
+                : recoverable
                   ? 'payment-result is-pending'
                   : 'payment-result'
             }
@@ -172,11 +205,17 @@ export function App() {
               <span className="status-dot" aria-hidden="true" />
               {blocked
                 ? 'Payment blocked before submission'
-                : pending
-                  ? 'Payment pending—not failed'
-                  : timeoutFlow
-                    ? 'Recovered safely · payment succeeded'
-                    : 'Payment succeeded'}
+                : reversalPending
+                  ? 'Reversal monitoring active · do not pay again'
+                  : pending
+                    ? reversalFlow
+                      ? 'Debit acknowledged · merchant confirmation missing'
+                      : 'Payment pending—not failed'
+                    : reversalFlow
+                      ? 'Reversal recorded on the original payment'
+                      : timeoutFlow
+                        ? 'Recovered safely · payment succeeded'
+                        : 'Payment succeeded'}
             </div>
             <div className="result-grid">
               <span>
@@ -203,12 +242,16 @@ export function App() {
                 </p>
               </div>
             ) : null}
-            {timeoutFlow ? (
+            {recoveryFlow ? (
               <div className="safety-explanation recovery-explanation">
                 <strong>
-                  {pending
-                    ? 'Do not create another payment—the original provider reference is preserved.'
-                    : 'The original payment resolved through a status inquiry.'}
+                  {reversalPending
+                    ? 'Debit is acknowledged but merchant confirmation is missing. Monitoring the original reference—do not pay again.'
+                    : pending
+                      ? 'Do not create another payment—the original provider reference is preserved.'
+                      : reversalFlow
+                        ? 'The provider reports the original debit as reversed; the durable ledger is resolved.'
+                        : 'The original payment resolved through a status inquiry.'}
                 </strong>
                 <p>
                   Provider submissions:{' '}
@@ -224,6 +267,22 @@ export function App() {
                   }
                   {replayConfirmed ? ' · Duplicate request returned the same resource.' : ''}
                 </p>
+                {reversalFlow && snapshot.recovery?.reversal_due_at ? (
+                  <div className="policy-clock">
+                    <span>
+                      Accelerated T+5 demo clock
+                      <strong>{formatClock(snapshot.recovery.reversal_due_at)}</strong>
+                    </span>
+                    <span>
+                      Complaint demo eligibility
+                      <strong>
+                        {snapshot.recovery.complaint_eligible_at
+                          ? formatClock(snapshot.recovery.complaint_eligible_at)
+                          : 'Not started'}
+                      </strong>
+                    </span>
+                  </div>
+                ) : null}
               </div>
             ) : null}
             <code>{snapshot.fraud_case?.case_id ?? snapshot.payment.payment_intent_id}</code>
@@ -237,7 +296,7 @@ export function App() {
           className={
             scenario === 'refund-collect'
               ? 'primary-action risk-action'
-              : timeoutFlow
+              : recoveryFlow
                 ? 'primary-action pending-action'
                 : 'primary-action'
           }
@@ -248,7 +307,7 @@ export function App() {
             ? 'Evaluating all three lenses…'
             : snapshot && !pending
               ? 'Reset this scenario'
-              : snapshot && timeoutFlow
+              : snapshot && recoveryFlow
                 ? replayConfirmed
                   ? 'Replay confirmed · one submission only'
                   : 'Retry same request safely'
@@ -256,11 +315,11 @@ export function App() {
                   ? 'Retry safely'
                   : scenario === 'refund-collect'
                     ? 'Inspect refund request'
-                    : timeoutFlow
+                    : recoveryFlow
                       ? 'Submit once securely'
                       : 'Continue securely'}
         </button>
-        {timeoutFlow && pending && replayConfirmed ? (
+        {(timeoutFlow ? pending && replayConfirmed : reversalFlow && recoverable) ? (
           <button
             type="button"
             className="secondary-action"
@@ -269,7 +328,11 @@ export function App() {
           >
             {status === 'recovering'
               ? 'Checking the original provider status…'
-              : 'Run status-first recovery'}
+              : reversalPending
+                ? 'Confirm reversal on original reference'
+                : reversalFlow
+                  ? 'Start reversal monitoring'
+                  : 'Run status-first recovery'}
           </button>
         ) : null}
         <p className="foundation-note">

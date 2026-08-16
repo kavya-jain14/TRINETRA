@@ -16,6 +16,12 @@ const SimulatorRequestSchema = z.object({
   amount_paise: z.number().int().positive(),
   scenario: ProviderScenarioSchema.default('SUCCESS_IMMEDIATE'),
 });
+const InquiryRequestSchema = z
+  .object({
+    providerRequestReference: z.string().min(1).max(160),
+    requestReference: z.string().min(1).max(200),
+  })
+  .strict();
 
 const initialStatus = {
   SUCCESS_IMMEDIATE: 'SUCCEEDED',
@@ -33,6 +39,8 @@ const initialStatus = {
 interface SyntheticPayment {
   scenario: string;
   inquiryCount: number;
+  lastInquiryRequestReference: string | null;
+  lastInquiryStatus: string | null;
 }
 const sandboxState = new Map<string, SyntheticPayment>();
 
@@ -71,7 +79,12 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
     }
 
     const providerReference = `psp_${parsed.data.payment_id.slice(3)}`;
-    sandboxState.set(providerReference, { scenario: parsed.data.scenario, inquiryCount: 0 });
+    sandboxState.set(providerReference, {
+      scenario: parsed.data.scenario,
+      inquiryCount: 0,
+      lastInquiryRequestReference: null,
+      lastInquiryStatus: null,
+    });
 
     if (parsed.data.scenario === 'TIMEOUT_THEN_SUCCESS') {
       return reply.code(504).send({
@@ -119,10 +132,13 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
   });
 
   app.post('/v1/inquire', async (request, reply) => {
-    const { providerRequestReference, requestReference } = request.body as {
-      providerRequestReference: string;
-      requestReference: string;
-    };
+    const parsed = InquiryRequestSchema.safeParse(request.body);
+    if (!parsed.success) {
+      return reply.code(400).send({
+        error: { code: 'VALIDATION_FAILED', message: 'Invalid deterministic PSP inquiry.' },
+      });
+    }
+    const { providerRequestReference, requestReference } = parsed.data;
     const payment = sandboxState.get(providerRequestReference);
     if (!payment) {
       return reply.code(200).send({
@@ -130,6 +146,22 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
         responseCode: 'UNKNOWN_REFERENCE',
         providerReference: providerRequestReference,
         evidence: { inquiry_request_ref: requestReference },
+      });
+    }
+
+    if (
+      payment.lastInquiryRequestReference === requestReference &&
+      payment.lastInquiryStatus !== null
+    ) {
+      return reply.code(200).send({
+        providerStatus: payment.lastInquiryStatus,
+        responseCode: 'SYNTHETIC_STATUS_REPLAY',
+        providerReference: providerRequestReference,
+        evidence: {
+          inquiry_request_ref: requestReference,
+          inquiry_number: payment.inquiryCount,
+          idempotent_replay: true,
+        },
       });
     }
 
@@ -144,6 +176,8 @@ export async function buildPspSandbox(config: PspSandboxConfig): Promise<Fastify
     if (payment.scenario === 'PENDING_THEN_REVERSED') {
       providerStatus = payment.inquiryCount === 1 ? 'REVERSAL_PENDING' : 'REVERSED';
     }
+    payment.lastInquiryRequestReference = requestReference;
+    payment.lastInquiryStatus = providerStatus;
 
     return reply.code(200).send({
       providerStatus,

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DemoPaymentSnapshotSchema,
   DemoRunRequestSchema,
+  DemoScenarioSchema,
   FraudCaseSnapshotSchema,
   PartnerWebhookEnvelopeSchema,
   PaymentIntentRequestSchema,
@@ -102,6 +103,16 @@ describe('payment intent contracts', () => {
         },
       }).success,
     ).toBe(false);
+    expect(
+      DemoScenarioSchema.parse({
+        key: 'reversal-recovery',
+        label: 'Merchant confirmation missing with safe reversal',
+        counterparty_name: 'Harbor Cafe Demo',
+        amount_paise: 42_500,
+        direction: 'PUSH',
+        claimed_goal: 'PAY_MERCHANT',
+      }).key,
+    ).toBe('reversal-recovery');
   });
 
   it('publishes an evidence-backed fraud case contract', () => {

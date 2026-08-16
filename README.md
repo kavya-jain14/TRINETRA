@@ -44,7 +44,8 @@ Services:
 - Consumer demo: `http://localhost:5174`
 
 With `DEMO_MODE=true` in the local `.env`, open both React apps. Run the fixed ₹249 trusted payment,
-the deceptive ₹1,999 refund-collect request, or the ₹786 accepted-timeout recovery journey. The
+the deceptive ₹1,999 refund-collect request, the ₹786 accepted-timeout recovery journey, or the
+₹425 merchant-confirmation reversal watch. The
 operations console polls the durable payment, recovery, and case timelines. Partner HMAC material
 is never sent to either browser. Demo orchestration cannot be enabled when `NODE_ENV=production`.
 
@@ -91,3 +92,15 @@ The operations console exposes the submit/inquiry evidence and clock without tur
 into a retry instruction. The worker uses the same ledger service for scheduled recovery. A
 real-service integration test proves that another API replica can replay and recover the payment
 through the PostgreSQL-backed synthetic provider state.
+
+## Fourth integration checkpoint
+
+Consumer demo submits one synthetic ₹425 merchant payment → provider acknowledgement leaves the
+original resource `PENDING` → the first status inquiry reports `REVERSAL_PENDING` and starts the
+accelerated T+5/complaint demo clocks → a second inquiry on the same provider reference records
+`REVERSED` → any terminal recovery replay is a no-op.
+
+The consumer explicitly says not to pay again, while operations shows one submission, two status
+inquiries, the durable policy-clock evidence, and the complete monotonic timeline. Real regulatory
+timing and reversal execution remain the responsibility of the partner bank or PSP; the prototype
+only visualizes and monitors them. PostgreSQL/Redis CI proves the two-pulse flow across API replicas.

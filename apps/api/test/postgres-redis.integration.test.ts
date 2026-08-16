@@ -231,6 +231,64 @@ describe.skipIf(!hasIntegrationServices)('PostgreSQL and Redis API integration',
     ).toEqual(['CREATED', 'RISK_EVALUATING', 'ALLOWED', 'SUBMITTED', 'PENDING', 'SUCCEEDED']);
   });
 
+  it('persists a two-pulse reversal across replicas without a duplicate submission', async () => {
+    const primary = apps[0]!;
+    const replica = apps[1]!;
+    const runId = `run_${randomUUID().replaceAll('-', '')}`;
+    const payload = { run_id: runId };
+
+    const pending = await primary.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/reversal-recovery/run',
+      payload,
+    });
+    const reversalPending = await replica.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/reversal-recovery/recover',
+      payload,
+    });
+    const reversed = await primary.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/reversal-recovery/recover',
+      payload,
+    });
+    const terminalReplay = await replica.inject({
+      method: 'POST',
+      url: '/v1/demo/scenarios/reversal-recovery/recover',
+      payload,
+    });
+
+    expect(pending.statusCode).toBe(201);
+    expect(pending.json()).toMatchObject({
+      payment: { state: 'PENDING' },
+      provider_attempts: [{ operation: 'SUBMIT', provider_status: 'PENDING' }],
+    });
+    expect(reversalPending.statusCode).toBe(200);
+    expect(reversalPending.json()).toMatchObject({
+      payment: { state: 'REVERSAL_PENDING' },
+      recovery: {
+        reversal_due_at: '2026-08-10T12:00:30.000Z',
+        complaint_eligible_at: '2026-08-10T12:02:00.000Z',
+      },
+    });
+    expect(reversed.statusCode).toBe(200);
+    expect(reversed.json().payment.state).toBe('REVERSED');
+    expect(
+      reversed.json().provider_attempts.map((attempt: { operation: string }) => attempt.operation),
+    ).toEqual(['SUBMIT', 'STATUS_INQUIRY', 'STATUS_INQUIRY']);
+    expect(reversed.json().timeline.map((event: { to_state: string }) => event.to_state)).toEqual([
+      'CREATED',
+      'RISK_EVALUATING',
+      'ALLOWED',
+      'SUBMITTED',
+      'PENDING',
+      'REVERSAL_PENDING',
+      'REVERSED',
+    ]);
+    expect(terminalReplay.statusCode).toBe(200);
+    expect(terminalReplay.json().provider_attempts).toHaveLength(3);
+  });
+
   it('persists a blocked refund case and its evidence across API replicas', async () => {
     const primary = apps[0]!;
     const replica = apps[1]!;

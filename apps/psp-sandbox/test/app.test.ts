@@ -77,6 +77,53 @@ describe('deterministic PSP sandbox', () => {
     await app.close();
   });
 
+  it('advances reversal inquiries once per request reference', async () => {
+    const app = await buildPspSandbox({
+      callbackSecret: 'foundation-demo-secret-at-least-32-characters',
+    });
+    const submitted = await app.inject({
+      method: 'POST',
+      url: '/v1/simulate',
+      payload: {
+        payment_id: 'pi_reversal_demo',
+        amount_paise: 42_500,
+        scenario: 'PENDING_THEN_REVERSED',
+      },
+    });
+    const inquiryPayload = {
+      providerRequestReference: 'psp_reversal_demo',
+      requestReference: 'status_reversal_demo_001',
+    };
+    const first = await app.inject({ method: 'POST', url: '/v1/inquire', payload: inquiryPayload });
+    const replay = await app.inject({
+      method: 'POST',
+      url: '/v1/inquire',
+      payload: inquiryPayload,
+    });
+    const second = await app.inject({
+      method: 'POST',
+      url: '/v1/inquire',
+      payload: { ...inquiryPayload, requestReference: 'status_reversal_demo_002' },
+    });
+
+    expect(submitted.statusCode).toBe(200);
+    expect(submitted.json().provider_event.status).toBe('PENDING');
+    expect(first.json()).toMatchObject({
+      providerStatus: 'REVERSAL_PENDING',
+      evidence: { inquiry_number: 1 },
+    });
+    expect(replay.json()).toMatchObject({
+      providerStatus: 'REVERSAL_PENDING',
+      responseCode: 'SYNTHETIC_STATUS_REPLAY',
+      evidence: { inquiry_number: 1, idempotent_replay: true },
+    });
+    expect(second.json()).toMatchObject({
+      providerStatus: 'REVERSED',
+      evidence: { inquiry_number: 2 },
+    });
+    await app.close();
+  });
+
   it('authenticates and deduplicates the synthetic partner webhook receiver', async () => {
     const callbackSecret = 'foundation-demo-secret-at-least-32-characters';
     const app = await buildPspSandbox({ callbackSecret });

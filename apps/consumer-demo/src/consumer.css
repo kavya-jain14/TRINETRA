@@ -16,20 +16,24 @@
 
 .scenario-switch {
   display: flex;
+  max-width: min(76vw, 720px);
   gap: 0.35rem;
   padding: 0.25rem;
   border: 1px solid var(--line);
   border-radius: 0.75rem;
   background: var(--surface);
+  overflow-x: auto;
 }
 
 .scenario-switch button {
+  flex: 0 0 auto;
   padding: 0.55rem 0.8rem;
   border: 0;
   border-radius: 0.55rem;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .scenario-switch button.is-active {
@@ -238,6 +242,28 @@
   font-size: 0.78rem;
 }
 
+.policy-clock {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+  margin-top: 0.8rem;
+}
+
+.policy-clock span {
+  padding: 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 0.65rem;
+  color: var(--muted);
+  font-size: 0.68rem;
+}
+
+.policy-clock strong {
+  display: block;
+  margin-top: 0.3rem;
+  color: var(--warning);
+  font-size: 0.8rem;
+}
+
 .result-grid {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
@@ -284,10 +310,14 @@
   }
 
   .scenario-switch button {
-    flex: 1;
+    flex: 0 0 auto;
   }
 
   .result-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .policy-clock {
     grid-template-columns: 1fr;
   }
 }
