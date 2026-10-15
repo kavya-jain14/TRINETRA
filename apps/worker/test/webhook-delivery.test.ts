@@ -14,6 +14,29 @@ const delivery = {
 };
 
 describe('HTTP webhook delivery', () => {
+  it('does not forward a signed delivery through a redirect', async () => {
+    let redirectedRequests = 0;
+    const server = createServer((request, response) => {
+      if (request.url === '/redirect') {
+        response.writeHead(307, { location: '/untrusted' }).end();
+      } else {
+        redirectedRequests += 1;
+        response.writeHead(202).end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const client = new HttpWebhookDeliveryClient(`http://127.0.0.1:${port}/redirect`);
+      await expect(client.deliver(delivery)).rejects.toBeInstanceOf(WebhookDeliveryError);
+      expect(redirectedRequests).toBe(0);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
   it('posts the signed envelope with a stable idempotency key', async () => {
     let receivedBody = '';
     let receivedHeaders: Record<string, string | string[] | undefined> = {};
