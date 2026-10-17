@@ -55,7 +55,8 @@ export class HttpWebhookDeliveryClient implements WebhookDeliveryClient {
       fetchImplementation ??
       (async (requestUrl, init) => {
         const response = await fetch(requestUrl, init);
-        await response.body?.cancel();
+        // Cleanup cannot invalidate an HTTP acknowledgement or change its retry classification.
+        await response.body?.cancel().catch(() => undefined);
         return { ok: response.ok, status: response.status };
       });
   }

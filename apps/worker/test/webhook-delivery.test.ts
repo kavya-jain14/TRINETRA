@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { workerEnvSchema } from '@trinetra/config';
 
@@ -13,7 +13,32 @@ const delivery = {
   signature: 'a'.repeat(64),
 };
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 describe('HTTP webhook delivery', () => {
+  it.each([
+    { status: 202, retryable: null },
+    { status: 400, retryable: false },
+    { status: 503, retryable: true },
+  ])('preserves HTTP $status when response cleanup fails', async ({ status, retryable }) => {
+    const cancel = vi.fn().mockRejectedValue(new Error('Synthetic response cleanup failure'));
+    const response = new Response(new ReadableStream({ cancel }), { status });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+    const client = new HttpWebhookDeliveryClient('https://partner.example.test/v1/events');
+
+    if (retryable === null) {
+      await expect(client.deliver(delivery)).resolves.toBeUndefined();
+    } else {
+      await expect(client.deliver(delivery)).rejects.toMatchObject({
+        message: `Partner webhook returned HTTP ${status}.`,
+        retryable,
+      });
+    }
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
   it('does not forward a signed delivery through a redirect', async () => {
     let redirectedRequests = 0;
     const server = createServer((request, response) => {
