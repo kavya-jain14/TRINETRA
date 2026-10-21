@@ -17,6 +17,7 @@ export type WebhookFetch = (
   url: string,
   init: {
     method: 'POST';
+    redirect: 'error';
     headers: Readonly<Record<string, string>>;
     body: string;
     signal: AbortSignal;
@@ -51,7 +52,13 @@ export class HttpWebhookDeliveryClient implements WebhookDeliveryClient {
     this.#endpoint = url.toString();
     this.#timeoutMs = timeoutMs;
     this.#fetch =
-      fetchImplementation ?? (async (requestUrl, init) => await fetch(requestUrl, init));
+      fetchImplementation ??
+      (async (requestUrl, init) => {
+        const response = await fetch(requestUrl, init);
+        // Cleanup must not delay an HTTP acknowledgement or change its retry classification.
+        void response.body?.cancel().catch(() => undefined);
+        return { ok: response.ok, status: response.status };
+      });
   }
 
   async deliver(input: SignedWebhookDelivery): Promise<void> {
@@ -62,6 +69,7 @@ export class HttpWebhookDeliveryClient implements WebhookDeliveryClient {
     try {
       response = await this.#fetch(this.#endpoint, {
         method: 'POST',
+        redirect: 'error',
         headers: {
           'content-type': 'application/json',
           'idempotency-key': input.deliveryKey,
