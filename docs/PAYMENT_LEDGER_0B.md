@@ -67,7 +67,8 @@ synthetic sandbox exposes `POST /v1/partner-events` as a signature-verifying, de
 receiver.
 
 Signed deliveries reject redirects instead of forwarding the envelope to another URL. Response
-bodies are cancelled without being read. A response-body cleanup failure does not override the
+bodies are cancelled without being read or awaited. A stalled cleanup cannot hold an acknowledged
+delivery open beyond the request deadline. A response-body cleanup failure does not override the
 received HTTP status: an accepted `2xx` remains acknowledged, permanent `4xx` failures remain
 non-retryable, and retryable statuses retain their existing classification. Network failures before
 an HTTP response remain retryable.

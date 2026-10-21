@@ -15,9 +15,33 @@ const delivery = {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  vi.useRealTimers();
 });
 
 describe('HTTP webhook delivery', () => {
+  it('completes an acknowledged delivery when response cleanup never settles', async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    const response = new Response(new ReadableStream({ cancel }), { status: 202 });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+    const client = new HttpWebhookDeliveryClient('https://partner.example.test/v1/events', 100);
+    let outcome = 'pending';
+    void client.deliver(delivery).then(
+      () => {
+        outcome = 'delivered';
+      },
+      () => {
+        outcome = 'failed';
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(101);
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(outcome).toBe('delivered');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it.each([
     { status: 202, retryable: null },
     { status: 400, retryable: false },
