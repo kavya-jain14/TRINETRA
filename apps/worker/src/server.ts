@@ -17,7 +17,8 @@ import {
   type RecoveryJobData,
   type WebhookJobData,
 } from './queues.js';
-import { processReconciliationJob, processRecoveryJob, processWebhookJob } from './processors.js';
+import { processReconciliationJob, processWebhookJob } from './processors.js';
+import { runRecoveryJob } from './recovery-job.js';
 import { enqueueDueWork } from './scheduler.js';
 import { HttpWebhookDeliveryClient, WebhookDeliveryError } from './webhook-delivery.js';
 
@@ -45,7 +46,7 @@ const webhookQueue = new Queue<WebhookJobData>(queueNames.webhooks, { connection
 
 const recoveryWorker = new Worker<RecoveryJobData>(
   queueNames.recovery,
-  async (job) => await processRecoveryJob(job.data, dependencies),
+  async (job, token) => await runRecoveryJob(job, dependencies, token),
   { connection, concurrency: 4 },
 );
 const reconciliationWorker = new Worker<ReconciliationJobData>(

@@ -51,7 +51,7 @@ submit remains a ledger-only duplicate.
 ## Recovery jobs
 
 - `STATUS_CHECK`: inquire using the original provider reference.
-- `PENDING_TIMEOUT`: move unresolved `PENDING` to `REVERSAL_PENDING` and start bounded clocks.
+- `PENDING_TIMEOUT`: re-read the durable pending deadline, then move unresolved `PENDING` to `REVERSAL_PENDING` only when that deadline is due. Early jobs return `WAIT` with the durable retry timestamp, without writing an event or starting reversal clocks; missing pending deadlines return `NOOP`. The worker moves an early job to BullMQ's delayed set using its lock token and throws `DelayedError`, preserving the same job ID for execution at the deadline instead of completing and retaining it. Queue arrival alone is not evidence that the deadline has passed.
 - `REVERSAL_PENDING`: keep status-first inquiry active until the provider reports `REVERSED`.
 - `REVERSAL_CLOCK`: return wait, reversal escalation, or complaint-eligible outcome.
 - reconciliation jobs reuse status inquiry and therefore preserve submit-once behavior.
