@@ -103,3 +103,5 @@ ledger history is intentionally not automated; restore from a tested backup inst
 in-process PostgreSQL-compatible engine, signed API flow tests, worker recovery tests, TypeScript,
 lint, builds, migration consistency, and the repository security scan. CI additionally applies the
 complete migration chain to PostgreSQL 17 before verification.
+
+Early reversal-clock jobs retain their deterministic queue ID and are delayed to the durable reversal deadline using the same BullMQ token/DelayedError adapter as pending timeouts. No reversal escalation is recorded before that deadline; exact-deadline execution proceeds normally. This is covered by an adapter regression; native PostgreSQL/Redis and partner deployment checks remain separate. API, event and database schemas are unchanged. Review: Kavya and Fuzail. Rollback: revert this scoped worker change.

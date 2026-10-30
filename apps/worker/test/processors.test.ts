@@ -161,6 +161,42 @@ describe('recovery processors', () => {
     expect(clock?.reversalDueAt?.toISOString()).toBe('2026-08-10T12:01:30.000Z');
   });
 
+  it('delays an early reversal clock until its durable deadline, then escalates', async () => {
+    const harness = await pendingHarness('PENDING_THEN_REVERSED');
+    await processRecoveryJob(
+      {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'PENDING_TIMEOUT',
+        recoveryKey: 'begin-reversal',
+      },
+      { ...harness, now: () => new Date(now.getTime() + 60_000) },
+    );
+    const clock = await harness.repository.getRecoveryClock(tenantId, 'pi_worker_001');
+    const deadline = clock!.reversalDueAt!.getTime();
+    const before = await harness.repository.listStateEvents(tenantId, 'pi_worker_001');
+    const moveToDelayed = vi.fn().mockResolvedValue(undefined);
+    const job = {
+      data: {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'REVERSAL_CLOCK' as const,
+        recoveryKey: 'early-reversal',
+      },
+      moveToDelayed,
+    };
+    await expect(
+      runRecoveryJob(job, { ...harness, now: () => new Date(deadline - 1) }, 'reversal-lock'),
+    ).rejects.toBeInstanceOf(DelayedError);
+    expect(moveToDelayed).toHaveBeenCalledExactlyOnceWith(deadline, 'reversal-lock');
+    expect(await harness.repository.listStateEvents(tenantId, 'pi_worker_001')).toEqual(before);
+    moveToDelayed.mockClear();
+    await expect(
+      runRecoveryJob(job, { ...harness, now: () => new Date(deadline) }, 'reversal-lock'),
+    ).resolves.toEqual({ outcome: 'ESCALATE_REVERSAL', state: 'REVERSAL_PENDING' });
+    expect(moveToDelayed).not.toHaveBeenCalled();
+  });
+
   it('continues status-first recovery from reversal pending to reversed', async () => {
     const harness = await pendingHarness('PENDING_THEN_REVERSED');
     const dependencies = { ...harness, now: () => now };

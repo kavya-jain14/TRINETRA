@@ -88,7 +88,7 @@ export async function processRecoveryJob(
     });
     return { outcome: 'ESCALATE_REVERSAL', state: payment.state } as const;
   }
-  return { outcome: 'WAIT', state: payment.state } as const;
+  return { outcome: 'WAIT', state: payment.state, retryAt: clock.reversalDueAt.getTime() } as const;
 }
 
 export async function processReconciliationJob(
