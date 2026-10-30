@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { workerEnvSchema } from '@trinetra/config';
 
@@ -13,7 +13,79 @@ const delivery = {
   signature: 'a'.repeat(64),
 };
 
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
 describe('HTTP webhook delivery', () => {
+  it('completes an acknowledged delivery when response cleanup never settles', async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn(() => new Promise<void>(() => undefined));
+    const response = new Response(new ReadableStream({ cancel }), { status: 202 });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+    const client = new HttpWebhookDeliveryClient('https://partner.example.test/v1/events', 100);
+    let outcome = 'pending';
+    void client.deliver(delivery).then(
+      () => {
+        outcome = 'delivered';
+      },
+      () => {
+        outcome = 'failed';
+      },
+    );
+
+    await vi.advanceTimersByTimeAsync(101);
+
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(outcome).toBe('delivered');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it.each([
+    { status: 202, retryable: null },
+    { status: 400, retryable: false },
+    { status: 503, retryable: true },
+  ])('preserves HTTP $status when response cleanup fails', async ({ status, retryable }) => {
+    const cancel = vi.fn().mockRejectedValue(new Error('Synthetic response cleanup failure'));
+    const response = new Response(new ReadableStream({ cancel }), { status });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+    const client = new HttpWebhookDeliveryClient('https://partner.example.test/v1/events');
+
+    if (retryable === null) {
+      await expect(client.deliver(delivery)).resolves.toBeUndefined();
+    } else {
+      await expect(client.deliver(delivery)).rejects.toMatchObject({
+        message: `Partner webhook returned HTTP ${status}.`,
+        retryable,
+      });
+    }
+    expect(cancel).toHaveBeenCalledOnce();
+  });
+
+  it('does not forward a signed delivery through a redirect', async () => {
+    let redirectedRequests = 0;
+    const server = createServer((request, response) => {
+      if (request.url === '/redirect') {
+        response.writeHead(307, { location: '/untrusted' }).end();
+      } else {
+        redirectedRequests += 1;
+        response.writeHead(202).end();
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const { port } = server.address() as AddressInfo;
+      const client = new HttpWebhookDeliveryClient(`http://127.0.0.1:${port}/redirect`);
+      await expect(client.deliver(delivery)).rejects.toBeInstanceOf(WebhookDeliveryError);
+      expect(redirectedRequests).toBe(0);
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+    }
+  });
   it('posts the signed envelope with a stable idempotency key', async () => {
     let receivedBody = '';
     let receivedHeaders: Record<string, string | string[] | undefined> = {};

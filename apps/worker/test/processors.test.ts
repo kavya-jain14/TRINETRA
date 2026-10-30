@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { DelayedError } from 'bullmq';
 
 import {
   DeterministicPaymentProviderAdapter,
@@ -8,6 +9,7 @@ import {
 
 import { processRecoveryJob, processWebhookJob } from '../src/processors.js';
 import { enqueueDueWork } from '../src/scheduler.js';
+import { runRecoveryJob } from '../src/recovery-job.js';
 
 const tenantId = '00000000-0000-4000-8000-000000000001';
 const now = new Date('2026-08-10T12:00:00.000Z');
@@ -58,7 +60,91 @@ describe('recovery processors', () => {
     expect(harness.provider.inquiryCount).toBe(1);
   });
 
-  it('moves an expired pending payment to reversal tracking', async () => {
+  it('keeps an early timeout job pending until its durable deadline', async () => {
+    const harness = await pendingHarness('PENDING_THEN_REVERSED');
+    const before = await harness.repository.listStateEvents(tenantId, 'pi_worker_001');
+    const result = await processRecoveryJob(
+      {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'PENDING_TIMEOUT',
+        recoveryKey: 'early-timeout-001',
+      },
+      { ...harness, now: () => new Date(now.getTime() + 59_999) },
+    );
+
+    expect(result).toEqual({ outcome: 'WAIT', state: 'PENDING', retryAt: now.getTime() + 60_000 });
+    expect((await harness.repository.getPayment(tenantId, 'pi_worker_001'))?.state).toBe('PENDING');
+    expect(await harness.repository.listStateEvents(tenantId, 'pi_worker_001')).toEqual(before);
+    expect(
+      (await harness.repository.getRecoveryClock(tenantId, 'pi_worker_001'))?.reversalDueAt,
+    ).toBeNull();
+  });
+
+  it('delays the same early job with its lock token instead of completing its retained ID', async () => {
+    const harness = await pendingHarness('PENDING_THEN_REVERSED');
+    const moveToDelayed = vi.fn().mockResolvedValue(undefined);
+    const job = {
+      data: {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'PENDING_TIMEOUT' as const,
+        recoveryKey: 'early-timeout-queue-001',
+      },
+      moveToDelayed,
+    };
+
+    await expect(
+      runRecoveryJob(job, { ...harness, now: () => now }, 'test-lock-token'),
+    ).rejects.toBeInstanceOf(DelayedError);
+    expect(moveToDelayed).toHaveBeenCalledExactlyOnceWith(
+      now.getTime() + 60_000,
+      'test-lock-token',
+    );
+    expect((await harness.repository.getPayment(tenantId, 'pi_worker_001'))?.state).toBe('PENDING');
+  });
+
+  it('completes a due recovery job without moving it to delayed', async () => {
+    const harness = await pendingHarness('PENDING_THEN_REVERSED');
+    const moveToDelayed = vi.fn().mockResolvedValue(undefined);
+    const job = {
+      data: {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'PENDING_TIMEOUT' as const,
+        recoveryKey: 'due-timeout-queue-001',
+      },
+      moveToDelayed,
+    };
+
+    await expect(
+      runRecoveryJob(
+        job,
+        { ...harness, now: () => new Date(now.getTime() + 60_000) },
+        'test-lock-token',
+      ),
+    ).resolves.toEqual({ outcome: 'REVERSAL_STARTED', state: 'REVERSAL_PENDING' });
+    expect(moveToDelayed).not.toHaveBeenCalled();
+  });
+
+  it('does not start reversal when a timeout job has no durable pending deadline', async () => {
+    const harness = await pendingHarness('PENDING_THEN_REVERSED');
+    vi.spyOn(harness.repository, 'getRecoveryClock').mockResolvedValue(null);
+    const result = await processRecoveryJob(
+      {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'PENDING_TIMEOUT',
+        recoveryKey: 'missing-clock-timeout-001',
+      },
+      { ...harness, now: () => new Date(now.getTime() + 60_000) },
+    );
+
+    expect(result).toEqual({ outcome: 'NOOP', state: 'PENDING' });
+    expect((await harness.repository.getPayment(tenantId, 'pi_worker_001'))?.state).toBe('PENDING');
+  });
+
+  it('moves a pending payment to reversal tracking at its durable deadline', async () => {
     const harness = await pendingHarness('PENDING_THEN_REVERSED');
     const result = await processRecoveryJob(
       {
@@ -67,12 +153,48 @@ describe('recovery processors', () => {
         operation: 'PENDING_TIMEOUT',
         recoveryKey: 'timeout-001',
       },
-      { ...harness, now: () => now },
+      { ...harness, now: () => new Date(now.getTime() + 60_000) },
     );
 
     expect(result).toEqual({ outcome: 'REVERSAL_STARTED', state: 'REVERSAL_PENDING' });
     const clock = await harness.repository.getRecoveryClock(tenantId, 'pi_worker_001');
-    expect(clock?.reversalDueAt?.toISOString()).toBe('2026-08-10T12:00:30.000Z');
+    expect(clock?.reversalDueAt?.toISOString()).toBe('2026-08-10T12:01:30.000Z');
+  });
+
+  it('delays an early reversal clock until its durable deadline, then escalates', async () => {
+    const harness = await pendingHarness('PENDING_THEN_REVERSED');
+    await processRecoveryJob(
+      {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'PENDING_TIMEOUT',
+        recoveryKey: 'begin-reversal',
+      },
+      { ...harness, now: () => new Date(now.getTime() + 60_000) },
+    );
+    const clock = await harness.repository.getRecoveryClock(tenantId, 'pi_worker_001');
+    const deadline = clock!.reversalDueAt!.getTime();
+    const before = await harness.repository.listStateEvents(tenantId, 'pi_worker_001');
+    const moveToDelayed = vi.fn().mockResolvedValue(undefined);
+    const job = {
+      data: {
+        tenantId,
+        paymentId: 'pi_worker_001',
+        operation: 'REVERSAL_CLOCK' as const,
+        recoveryKey: 'early-reversal',
+      },
+      moveToDelayed,
+    };
+    await expect(
+      runRecoveryJob(job, { ...harness, now: () => new Date(deadline - 1) }, 'reversal-lock'),
+    ).rejects.toBeInstanceOf(DelayedError);
+    expect(moveToDelayed).toHaveBeenCalledExactlyOnceWith(deadline, 'reversal-lock');
+    expect(await harness.repository.listStateEvents(tenantId, 'pi_worker_001')).toEqual(before);
+    moveToDelayed.mockClear();
+    await expect(
+      runRecoveryJob(job, { ...harness, now: () => new Date(deadline) }, 'reversal-lock'),
+    ).resolves.toEqual({ outcome: 'ESCALATE_REVERSAL', state: 'REVERSAL_PENDING' });
+    expect(moveToDelayed).not.toHaveBeenCalled();
   });
 
   it('continues status-first recovery from reversal pending to reversed', async () => {

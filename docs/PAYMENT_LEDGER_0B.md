@@ -51,7 +51,7 @@ submit remains a ledger-only duplicate.
 ## Recovery jobs
 
 - `STATUS_CHECK`: inquire using the original provider reference.
-- `PENDING_TIMEOUT`: move unresolved `PENDING` to `REVERSAL_PENDING` and start bounded clocks.
+- `PENDING_TIMEOUT`: re-read the durable pending deadline, then move unresolved `PENDING` to `REVERSAL_PENDING` only when that deadline is due. Early jobs return `WAIT` with the durable retry timestamp, without writing an event or starting reversal clocks; missing pending deadlines return `NOOP`. The worker moves an early job to BullMQ's delayed set using its lock token and throws `DelayedError`, preserving the same job ID for execution at the deadline instead of completing and retaining it. Queue arrival alone is not evidence that the deadline has passed.
 - `REVERSAL_PENDING`: keep status-first inquiry active until the provider reports `REVERSED`.
 - `REVERSAL_CLOCK`: return wait, reversal escalation, or complaint-eligible outcome.
 - reconciliation jobs reuse status inquiry and therefore preserve submit-once behavior.
@@ -65,6 +65,13 @@ timeouts, `429`, and `5xx` responses remain unpublished and retry with exponenti
 Permanent `4xx` contract failures stop automatic retry and remain visible for operator repair. The
 synthetic sandbox exposes `POST /v1/partner-events` as a signature-verifying, deduplicating local
 receiver.
+
+Signed deliveries reject redirects instead of forwarding the envelope to another URL. Response
+bodies are cancelled without being read or awaited. A stalled cleanup cannot hold an acknowledged
+delivery open beyond the request deadline. A response-body cleanup failure does not override the
+received HTTP status: an accepted `2xx` remains acknowledged, permanent `4xx` failures remain
+non-retryable, and retryable statuses retain their existing classification. Network failures before
+an HTTP response remain retryable.
 
 The fixed reversal demo exercises the same path without a second debit: the provider begins at
 `PENDING`, distinct idempotent status pulses advance to `REVERSAL_PENDING` and `REVERSED`, and a
@@ -96,3 +103,5 @@ ledger history is intentionally not automated; restore from a tested backup inst
 in-process PostgreSQL-compatible engine, signed API flow tests, worker recovery tests, TypeScript,
 lint, builds, migration consistency, and the repository security scan. CI additionally applies the
 complete migration chain to PostgreSQL 17 before verification.
+
+Early reversal-clock jobs retain their deterministic queue ID and are delayed to the durable reversal deadline using the same BullMQ token/DelayedError adapter as pending timeouts. No reversal escalation is recorded before that deadline; exact-deadline execution proceeds normally. This is covered by an adapter regression; native PostgreSQL/Redis and partner deployment checks remain separate. API, event and database schemas are unchanged. Review: Kavya and Fuzail. Rollback: revert this scoped worker change.

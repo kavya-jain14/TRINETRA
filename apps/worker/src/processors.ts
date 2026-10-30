@@ -43,6 +43,15 @@ export async function processRecoveryJob(
 
   if (data.operation === 'PENDING_TIMEOUT') {
     if (payment.state !== 'PENDING') return { outcome: 'NOOP', state: payment.state } as const;
+    const clock = await dependencies.repository.getRecoveryClock(data.tenantId, data.paymentId);
+    if (!clock?.pendingExpiresAt) return { outcome: 'NOOP', state: payment.state } as const;
+    if (clock.pendingExpiresAt > now) {
+      return {
+        outcome: 'WAIT',
+        state: payment.state,
+        retryAt: clock.pendingExpiresAt.getTime(),
+      } as const;
+    }
     const transitioned = await dependencies.repository.transitionPayment({
       tenantId: data.tenantId,
       paymentId: data.paymentId,
@@ -79,7 +88,7 @@ export async function processRecoveryJob(
     });
     return { outcome: 'ESCALATE_REVERSAL', state: payment.state } as const;
   }
-  return { outcome: 'WAIT', state: payment.state } as const;
+  return { outcome: 'WAIT', state: payment.state, retryAt: clock.reversalDueAt.getTime() } as const;
 }
 
 export async function processReconciliationJob(
